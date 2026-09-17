@@ -5,8 +5,7 @@ public class AetherlineEditorTarget : TargetRules
 	public AetherlineEditorTarget(TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Editor;
-		DefaultBuildSettings = BuildSettingsVersion.Latest;
-		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
+		DefaultBuildSettings = BuildSettingsVersion.V5;
 		ExtraModuleNames.Add("Aetherline");
 	}
 }

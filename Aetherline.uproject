@@ -1,18 +1,13 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.5",
+	"EngineAssociation": "5.8",
 	"Category": "Games",
-	"Description": "AETHERLINE — F2P first-person hero shooter",
+	"Description": "AETHERLINE",
 	"Modules": [
 		{
 			"Name": "Aetherline",
 			"Type": "Runtime",
-			"LoadingPhase": "Default",
-			"AdditionalDependencies": ["Engine", "GameplayAbilities", "UMG"]
+			"LoadingPhase": "Default"
 		}
-	],
-	"Plugins": [
-		{ "Name": "GameplayAbilities", "Enabled": true },
-		{ "Name": "EnhancedInput", "Enabled": true }
 	]
 }
