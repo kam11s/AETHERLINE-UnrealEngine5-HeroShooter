@@ -1,2 +1,2 @@
-Close Unreal. Download a FRESH zip of this repo. Right-click Aetherline.uproject → Generate Visual Studio project files. Rebuild Yes.
-Log: Saved/Logs/Aetherline.log — send the ERROR lines.
+Throw away the old folder. Download a NEW zip from GitHub.
+Double-click Aetherline.uproject → UnrealEditor → Yes on rebuild.
