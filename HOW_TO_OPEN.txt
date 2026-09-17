@@ -1,18 +1,11 @@
-AETHERLINE — Unreal Engine 5
-Repo: https://github.com/kam11s/AETHERLINE-UnrealEngine5-HeroShooter
+RAVELIN / Aetherline — how to open
 
-1. Install Epic Games Launcher and Unreal Engine 5.5 (5.6/5.8 ok).
-2. Download this folder (GitHub green Code button → Download ZIP).
-3. Double-click Aetherline.uproject
-4. If asked, pick Unreal 5.5+ and let it compile.
-5. New Level (Empty) → place actor ALArenaBuilder + PlayerStart
-6. Save map Content/Maps/L_OrionSpire
-7. Project Settings → Maps & Modes → Game Default Map = L_OrionSpire
-   GameMode Override = ALGameMode
-8. Plug in any controller, then press Play.
+1. Double-click Aetherline.uproject
+2. Wait for compile if asked (Yes)
+3. Press the green Play button
 
-Keyboard: WASD, mouse look, LMB fire, Space jump, Q/E, F ult, 1-6 hero.
+DO NOT place ALArenaBuilder or PlayerStart.
+AALGameMode::BeginPlay calls SpawnArenaIfMissing() and builds the yard at Play.
+The editor viewport is Unreal's empty default map. That is normal.
 
-Controller (Xbox, PlayStation, Switch, Steam Input):
-  Left stick move | Right stick look | RT fire | A jump
-  LB ability Q | RB ability E | Y ultimate | D-pad change hero
+Ignore any old 4-step graphic that says "drag a box into the level."
