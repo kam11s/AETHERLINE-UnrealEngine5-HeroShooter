@@ -6,6 +6,7 @@
 #include "ALHeroCharacter.generated.h"
 
 class UCameraComponent;
+class UStaticMeshComponent;
 
 UCLASS()
 class AETHERLINE_API AALHeroCharacter : public ACharacter
@@ -25,6 +26,7 @@ public:
 	UFUNCTION(Server, Reliable) void ServerApplyDamageTo(AALHeroCharacter* Target, float Amount);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UCameraComponent> FPCamera;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunMesh;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) EALHero HeroId = EALHero::Wraith;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) EALTeam TeamId = EALTeam::Ally;
 	UPROPERTY(Replicated) float UltCharge = 0.f;
