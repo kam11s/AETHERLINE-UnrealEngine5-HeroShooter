@@ -10,5 +10,5 @@ class AETHERLINE_API AALHUD : public AHUD
 public:
 	virtual void DrawHUD() override;
 protected:
-	void Bar(float X, float Y, float W, float H, float Fill, FLinearColor Back, FLinearColor Front) const;
+	void Bar(float X, float Y, float W, float H, float Fill, FLinearColor Back, FLinearColor Front);
 };
