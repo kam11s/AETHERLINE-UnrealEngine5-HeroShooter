@@ -1,10 +1,15 @@
-AETHERLINE — PLAY NOW (UE 5.8)
+AETHERLINE — UE 5.8
 
-1. Double-click Aetherline.uproject
-2. Pick Unreal Engine 5.8 if asked
-3. Wait until compile finishes (first time only)
-4. Press the green Play button
+Download:
+https://github.com/kam11s/AETHERLINE-UnrealEngine5-HeroShooter/archive/refs/heads/main.zip
 
-Do NOT place actors. ALGameMode builds the yard when Play starts.
+1. Extract to D:\Aetherline  (not inside the Unreal Engine folder)
+2. Confirm Source\Aetherline\ALTypes.h contains EALDropPhase
+3. Double-click Aetherline.uproject
+4. Choose UnrealEditor / UE 5.8
+5. Click Yes on rebuild
+6. Wait. First compile takes a few minutes.
+7. Green Play
 
-If it says build from source manually: install Visual Studio 2022 with the Game development with C++ workload, restart, open the uproject again.
+Need on this PC: Unreal Engine 5.8 + Visual Studio 2022 (Game development with C++).
+If a previous try failed, delete Intermediate and Binaries before opening again.
