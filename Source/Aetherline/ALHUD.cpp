@@ -31,6 +31,8 @@ void AALHUD::DrawHUD()
 	Bar(48.f, SY - 72.f, 280.f, 16.f, Health, Dim, Teal);
 	Bar(SX - 328.f, SY - 72.f, 280.f, 10.f, Ult, Dim, Amber);
 
+	DrawText(TEXT("RAVELIN"), Teal, 48.f, SY - 96.f);
+
 	if (const AALGameState* GS = GetWorld() ? GetWorld()->GetGameState<AALGameState>() : nullptr)
 	{
 		if (GS->IsBattleRoyale())

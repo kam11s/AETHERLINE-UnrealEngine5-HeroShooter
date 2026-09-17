@@ -1,4 +1,4 @@
-AETHERLINE — UE 5.8
+RAVELIN (internal: Aetherline) — UE 5.8
 
 Download:
 https://github.com/kam11s/AETHERLINE-UnrealEngine5-HeroShooter/archive/refs/heads/main.zip
@@ -7,8 +7,9 @@ https://github.com/kam11s/AETHERLINE-UnrealEngine5-HeroShooter/archive/refs/head
 2. Double-click Aetherline.uproject
 3. Choose UnrealEditor / UE 5.8
 4. Click Yes on rebuild
-5. Green Play
+5. Green Play — HUD reads RAVELIN
 
 Need: Unreal Engine 5.8 + Visual Studio 2022 (Game development with C++).
 
 BOTS / AGENTS: read AGENTS.md and COMPILE_RULES.txt before editing anything.
+Public name is RAVELIN. Do not rename the Aetherline C++ module.
