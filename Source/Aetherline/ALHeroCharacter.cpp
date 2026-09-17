@@ -2,6 +2,9 @@
 #include "ALHeroCatalog.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
@@ -19,6 +22,17 @@ AALHeroCharacter::AALHeroCharacter()
 	FPCamera->SetupAttachment(GetCapsuleComponent());
 	FPCamera->SetRelativeLocation(FVector(0.f, 0.f, 64.f));
 	FPCamera->bUsePawnControlRotation = true;
+
+	GunMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GunMesh"));
+	GunMesh->SetupAttachment(FPCamera);
+	GunMesh->SetRelativeLocation(FVector(28.f, 10.f, -8.f));
+	GunMesh->SetRelativeRotation(FRotator(0.f, 0.f, 0.f));
+	GunMesh->SetRelativeScale3D(FVector(0.45f, 0.12f, 0.12f));
+	GunMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")))
+	{
+		GunMesh->SetStaticMesh(Cube);
+	}
 }
 void AALHeroCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -83,7 +97,7 @@ void AALHeroCharacter::FireOnce()
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(ALFire), false, this);
 	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
 	const FVector TracerEnd = bHit ? Hit.ImpactPoint : End;
-	DrawDebugLine(GetWorld(), Start, TracerEnd, FColor(40, 220, 255), false, 0.08f, 0, 2.0f);
+	DrawDebugLine(GetWorld(), Start + Dir * 40.f, TracerEnd, FColor(40, 220, 255), false, 0.08f, 0, 2.0f);
 	if (bHit)
 	{
 		DrawDebugPoint(GetWorld(), Hit.ImpactPoint, 10.f, FColor(255, 160, 40), false, 0.12f);
