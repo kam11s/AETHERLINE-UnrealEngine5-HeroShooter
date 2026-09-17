@@ -1,0 +1,16 @@
+AETHERLINE — READ THIS FIRST
+Repo: https://github.com/kam11s/AETHERLINE-UnrealEngine5-HeroShooter
+Engine: Unreal Engine 5.8
+
+1. Install UE 5.8 from Epic Launcher
+2. Download ZIP or git clone this repo
+3. Double-click Aetherline.uproject — pick 5.8
+4. Wait for C++ compile
+5. New Empty Level — place ALArenaBuilder + PlayerStart
+6. Save Content/Maps/L_OrionSpire
+7. Project Settings → that map + GameMode ALGameMode
+8. Play
+
+Picture tutorial: Docs/TUTORIAL_OPEN.png
+Battle Royale = 21 players, teams of 3, jump from dropship.
+Training / Skirmish / Ranked are unchanged.
