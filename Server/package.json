@@ -1,0 +1,6 @@
+{
+  "name": "aetherline-commerce",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node commerce.mjs" }
+}
