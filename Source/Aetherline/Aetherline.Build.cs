@@ -8,9 +8,8 @@ public class Aetherline : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput",
-			"GameplayAbilities", "GameplayTags", "GameplayTasks",
-			"UMG", "Slate", "SlateCore", "AIModule", "NavigationSystem",
-			"NetCore", "OnlineSubsystem", "OnlineSubsystemUtils"
+			"GameplayAbilities", "GameplayTags", "GameplayTasks", "UMG",
+			"AIModule", "HTTP", "Json", "JsonUtilities"
 		});
 	}
 }
