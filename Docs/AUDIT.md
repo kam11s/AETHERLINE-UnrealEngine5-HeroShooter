@@ -1,0 +1,1 @@
+AETHERLINE source audit 2026-09-17. Fixed double bot possess, server damage validation, 5s load gate. Not EAC/VAC. No cooked map. Stripe test mode. See repo Docs/AUDIT.md in local project for the table.
