@@ -1,0 +1,11 @@
+AETHERLINE — do this the minute Unreal Engine 5.5 finishes installing
+
+Repo: https://github.com/kam11s/AETHERLINE-UnrealEngine5-HeroShooter
+
+1. Double-click Aetherline.uproject and pick UE 5.5+
+2. Let C++ compile. First time is slow.
+3. File → New Level → Empty Level
+4. Place ALArenaBuilder and PlayerStart
+5. Save as Content/Maps/L_OrionSpire
+6. Project Settings → Maps & Modes → that map + GameMode ALGameMode
+7. Play. Send one screenshot so lighting can be matched to the stills.
