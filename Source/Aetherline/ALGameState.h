@@ -17,5 +17,5 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly) float CircleRadius = 12000.f;
 	UPROPERTY(Replicated, BlueprintReadOnly) EALDropPhase DropPhase = EALDropPhase::Lobby;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-	UFUNCTION(BlueprintPure) bool IsBattleRoyale() const { return Playlist == EALPlaylist::BattleRoyale; }
+	UFUNCTION(BlueprintPure) bool IsBattleRoyale() const;
 };

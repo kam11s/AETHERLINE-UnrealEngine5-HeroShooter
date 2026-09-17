@@ -1,5 +1,4 @@
 using UnrealBuildTool;
-
 public class AetherlineEditorTarget : TargetRules
 {
 	public AetherlineEditorTarget(TargetInfo Target) : base(Target)

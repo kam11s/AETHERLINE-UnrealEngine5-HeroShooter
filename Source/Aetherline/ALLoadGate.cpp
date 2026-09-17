@@ -1,9 +1,3 @@
 #include "ALLoadGate.h"
-
-void UALLoadGate::BeginLoad(const FString& Reason)
-{
-}
-
-void UALLoadGate::MarkWorldReady()
-{
-}
+void UALLoadGate::BeginLoad(const FString& Reason) {}
+void UALLoadGate::MarkWorldReady() {}
