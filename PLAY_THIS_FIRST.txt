@@ -4,12 +4,11 @@ Download:
 https://github.com/kam11s/AETHERLINE-UnrealEngine5-HeroShooter/archive/refs/heads/main.zip
 
 1. Extract to D:\Aetherline  (not inside the Unreal Engine folder)
-2. Confirm Source\Aetherline\ALTypes.h contains EALDropPhase
-3. Double-click Aetherline.uproject
-4. Choose UnrealEditor / UE 5.8
-5. Click Yes on rebuild
-6. Wait. First compile takes a few minutes.
-7. Green Play
+2. Double-click Aetherline.uproject
+3. Choose UnrealEditor / UE 5.8
+4. Click Yes on rebuild
+5. Green Play
 
-Need on this PC: Unreal Engine 5.8 + Visual Studio 2022 (Game development with C++).
-If a previous try failed, delete Intermediate and Binaries before opening again.
+Need: Unreal Engine 5.8 + Visual Studio 2022 (Game development with C++).
+
+BOTS / AGENTS: read AGENTS.md and COMPILE_RULES.txt before editing anything.

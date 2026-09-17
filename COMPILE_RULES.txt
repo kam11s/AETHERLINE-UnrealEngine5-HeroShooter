@@ -1,0 +1,15 @@
+AETHERLINE COMPILE RULES (UE 5.8.2)
+Read before any code change. These rules exist because the build already died on each of them.
+
+1. EngineAssociation = 5.8
+2. DefaultBuildSettings = BuildSettingsVersion.V7  (both Target.cs files)
+3. Build.cs modules ONLY: Core, CoreUObject, Engine, InputCore, UMG, AIModule
+4. NO Gameplay Ability System
+5. NO Enhanced Input — use DefaultInput.ini + BindAction/BindAxis
+6. UFUNCTION params MUST be named  (BeginLoad(const FString& Reason)  not  const FString&)
+7. NO inline bodies on UFUNCTION in headers
+8. ALHUD::Bar is NOT const (DrawRect is non-const)
+9. ALTypes.h MUST define EALDropPhase and EALPlaylist::BattleRoyale
+10. Keep ALGameState.h on disk — HUD includes it
+11. Ignore log lines about aqProf.dll / VtuneApi.dll — those are not the compile error
+12. Owner opens Aetherline.uproject and clicks Yes to rebuild. Do not invent a second project.
