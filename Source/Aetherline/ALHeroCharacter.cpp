@@ -4,6 +4,7 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
 
 AALHeroCharacter::AALHeroCharacter()
@@ -77,14 +78,21 @@ void AALHeroCharacter::FireOnce()
 	FireCooldown = 1.f / FMath::Max(Def.FireRate, 0.1f);
 	const FVector Start = FPCamera ? FPCamera->GetComponentLocation() : GetActorLocation();
 	const FVector Dir = FPCamera ? FPCamera->GetForwardVector() : GetActorForwardVector();
-	FHitResult Hit; FCollisionQueryParams Params(SCENE_QUERY_STAT(ALFire), false, this);
-	if (GetWorld()->LineTraceSingleByChannel(Hit, Start, Start + Dir * Def.Range, ECC_Visibility, Params))
+	const FVector End = Start + Dir * Def.Range;
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(ALFire), false, this);
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
+	const FVector TracerEnd = bHit ? Hit.ImpactPoint : End;
+	DrawDebugLine(GetWorld(), Start, TracerEnd, FColor(40, 220, 255), false, 0.08f, 0, 2.0f);
+	if (bHit)
 	{
+		DrawDebugPoint(GetWorld(), Hit.ImpactPoint, 10.f, FColor(255, 160, 40), false, 0.12f);
 		if (AALHeroCharacter* Other = Cast<AALHeroCharacter>(Hit.GetActor()))
 		{
 			if (Other->TeamId != TeamId) ServerApplyDamageTo(Other, Def.Damage);
 		}
 	}
+	AddControllerPitchInput(-0.12f);
 }
 void AALHeroCharacter::ServerApplyDamageTo_Implementation(AALHeroCharacter* Target, float Amount)
 {
