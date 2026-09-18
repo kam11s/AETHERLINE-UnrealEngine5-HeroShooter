@@ -66,16 +66,23 @@ void AALArenaBuilder::BeginPlay()
 		FVector(1100.f,-1100.f, 70.f), FVector(-1100.f, 1100.f, 70.f),
 		FVector( 450.f,  300.f, 55.f), FVector(-480.f, -320.f, 55.f)
 	};
+	CoverPoints.Reset();
 	for (int32 i = 0; i < 12; ++i)
 	{
 		const bool bAmber = (i % 3) == 0;
 		Box(Covers[i], FVector(170.f + (i % 3) * 30.f, 72.f, 72.f + (i % 2) * 28.f), bAmber ? Amber : Rust);
+		CoverPoints.Add(Covers[i]);
 	}
 
-	Box(FVector(0.f, 1900.f, 160.f), FVector(70.f, 70.f, 160.f), Teal);
-	Box(FVector(0.f,-1900.f, 160.f), FVector(70.f, 70.f, 160.f), Teal);
-	Box(FVector(1900.f, 0.f, 160.f), FVector(70.f, 70.f, 160.f), Amber);
-	Box(FVector(-1900.f, 0.f, 160.f), FVector(70.f, 70.f, 160.f), Amber);
+	const FVector Pylons[] = {
+		FVector(0.f, 1900.f, 160.f), FVector(0.f, -1900.f, 160.f),
+		FVector(1900.f, 0.f, 160.f), FVector(-1900.f, 0.f, 160.f)
+	};
+	for (int32 i = 0; i < 4; ++i)
+	{
+		Box(Pylons[i], FVector(70.f, 70.f, 160.f), (i < 2) ? Teal : Amber);
+		CoverPoints.Add(Pylons[i]);
+	}
 
 	Lights();
 }

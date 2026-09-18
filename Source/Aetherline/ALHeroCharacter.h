@@ -27,16 +27,31 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UCameraComponent> FPCamera;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunMesh;
+	// Third-person body seen by everyone except the owning player (bOwnerNoSee keeps the FP view clean).
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> BodyMesh;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> HeadMesh;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) EALHero HeroId = EALHero::Wraith;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) EALTeam TeamId = EALTeam::Ally;
 	UPROPERTY(Replicated) float UltCharge = 0.f;
 	UPROPERTY(Replicated) bool bOnDropship = false;
 	UPROPERTY(Replicated) bool bSkydiving = false;
 	UPROPERTY(EditAnywhere) int32 SquadId = 0;
+	UPROPERTY(EditAnywhere) float RespawnDelay = 4.f;
+	// World time stamps the HUD reads for damage flash / hit-marker feedback.
+	float LastDamagedTime = -100.f;
+	float LastHitConfirmTime = -100.f;
 	void AttachToDropship(AActor* Ship);
 	void DeployFromDropship();
+	FVector GetEyeLocation() const;
+	// Fires one hitscan shot along Dir. Returns false if on cooldown or dead. Used by both player input and bots.
+	bool FireShot(const FVector& Dir, float DamageScale);
+	void HandleDeath(AALHeroCharacter* Killer);
+	void Respawn();
 
 protected:
+	void RefreshTeamVisuals();
+	EALTeam VisualTeam = EALTeam::None;
+	FTimerHandle RespawnHandle;
 	void OnJump();
 	void OnFire();
 	void MoveForward(float V);
