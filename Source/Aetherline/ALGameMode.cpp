@@ -81,10 +81,13 @@ void AALGameMode::StartBattleRoyale()
 void AALGameMode::SpawnBots()
 {
 	UWorld* W = GetWorld(); if (!W) return;
+	// The yard is dense now; nudge bots out of any container/crate they roll into.
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 	for (int32 i = 0; i < BotFill; ++i)
 	{
 		const FVector Loc(FMath::FRandRange(-1800.f,1800.f), FMath::FRandRange(-1800.f,1800.f), 120.f);
-		AALHeroCharacter* Bot = W->SpawnActor<AALHeroCharacter>(AALHeroCharacter::StaticClass(), Loc, FRotator::ZeroRotator);
+		AALHeroCharacter* Bot = W->SpawnActor<AALHeroCharacter>(AALHeroCharacter::StaticClass(), Loc, FRotator::ZeroRotator, Params);
 		if (!Bot) continue;
 		Bot->TeamId = (i%2==0)? EALTeam::Enemy : EALTeam::Ally;
 		Bot->ApplyHero(static_cast<EALHero>(i%6));
