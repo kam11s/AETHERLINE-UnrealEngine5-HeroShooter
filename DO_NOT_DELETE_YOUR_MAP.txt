@@ -1,0 +1,12 @@
+RAVELIN / Aetherline
+
+Your map RavelinYard lives on YOUR PC under Content/Maps.
+It is NOT on GitHub.
+
+When updating code from GitHub:
+- Do NOT delete D:\Aetherline
+- Only replace files under Source\ and Config\ if needed
+- Keep Content\Maps\RavelinYard.umap
+
+The gun and teal/amber yard spawn from C++ when you press Play.
+Cubes you drag in the editor are yours and stay in RavelinYard.
