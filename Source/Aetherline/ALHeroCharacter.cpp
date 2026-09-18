@@ -25,9 +25,9 @@ AALHeroCharacter::AALHeroCharacter()
 
 	GunMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GunMesh"));
 	GunMesh->SetupAttachment(FPCamera);
-	GunMesh->SetRelativeLocation(FVector(28.f, 10.f, -8.f));
-	GunMesh->SetRelativeRotation(FRotator(0.f, 0.f, 0.f));
-	GunMesh->SetRelativeScale3D(FVector(0.45f, 0.12f, 0.12f));
+	GunMesh->SetRelativeLocation(FVector(42.f, 18.f, -14.f));
+	GunMesh->SetRelativeRotation(FRotator(0.f, 4.f, 0.f));
+	GunMesh->SetRelativeScale3D(FVector(0.85f, 0.22f, 0.18f));
 	GunMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	if (UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")))
 	{
