@@ -65,6 +65,18 @@ namespace
 	const FLinearColor GunNearBlack(0.02f, 0.025f, 0.03f);
 	const FLinearColor GunAmber(0.89f, 0.60f, 0.18f);
 
+	// Third-person proxy (owner-no-see) standing vs. crouched, relative to the capsule centre. The body cylinder is
+	// 100cm tall before scale, so standing it spans -88..40 and crouched -52..20, hugging the capsule in both poses.
+	const float BodyStandZ = -24.f;
+	const float BodyCrouchZ = -16.f;
+	const float BodyStandScaleZ = 1.28f;
+	const float BodyCrouchScaleZ = 0.72f;
+	const float HeadStandZ = 62.f;
+	const float HeadCrouchZ = 30.f;
+	// Overlap tests use a capsule shrunk by this much so resting contact with floor / walls does not count as a block
+	// (same trick as UCharacterMovementComponent::UnCrouch).
+	const float StandSweepInflation = 0.1f;
+
 	void TintGunPart(UStaticMeshComponent* Part, UMaterialInterface* Base, UObject* Outer, const FLinearColor& Color)
 	{
 		if (!Part || !Base) return;
@@ -83,14 +95,14 @@ AALHeroCharacter::AALHeroCharacter()
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationRoll = false;
-	GetCapsuleComponent()->SetCapsuleHalfHeight(88.f);
+	GetCapsuleComponent()->SetCapsuleHalfHeight(StandingHalfHeight);
 	GetCapsuleComponent()->SetCapsuleRadius(34.f);
-	GetCharacterMovement()->MaxWalkSpeed = 600.f;
+	GetCharacterMovement()->MaxWalkSpeed = StandingSpeed;
 	GetCharacterMovement()->JumpZVelocity = 520.f;
 	GetCharacterMovement()->AirControl = 0.35f;
 	FPCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FPCamera"));
 	FPCamera->SetupAttachment(GetCapsuleComponent());
-	FPCamera->SetRelativeLocation(FVector(0.f, 0.f, 64.f));
+	FPCamera->SetRelativeLocation(FVector(0.f, 0.f, StandingEyeZ));
 	FPCamera->SetFieldOfView(90.f);
 	FPCamera->bUsePawnControlRotation = true;
 
@@ -100,13 +112,13 @@ AALHeroCharacter::AALHeroCharacter()
 	GunRoot->SetRelativeRotation(GunRestRotation);
 	BodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyMesh"));
 	BodyMesh->SetupAttachment(GetCapsuleComponent());
-	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, -24.f));
-	BodyMesh->SetRelativeScale3D(FVector(0.62f, 0.62f, 1.28f));
+	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, BodyStandZ));
+	BodyMesh->SetRelativeScale3D(FVector(0.62f, 0.62f, BodyStandScaleZ));
 	BodyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BodyMesh->SetOwnerNoSee(true);
 	HeadMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HeadMesh"));
 	HeadMesh->SetupAttachment(GetCapsuleComponent());
-	HeadMesh->SetRelativeLocation(FVector(0.f, 0.f, 62.f));
+	HeadMesh->SetRelativeLocation(FVector(0.f, 0.f, HeadStandZ));
 	HeadMesh->SetRelativeScale3D(FVector(0.4f, 0.4f, 0.4f));
 	HeadMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	HeadMesh->SetOwnerNoSee(true);
@@ -183,7 +195,10 @@ void AALHeroCharacter::ApplyHero(EALHero Hero)
 {
 	HeroId = Hero;
 	const FALHeroDef Def = UALHeroCatalog::Get(Hero);
+	StandingSpeed = Def.MoveSpeed;
 	GetCharacterMovement()->MaxWalkSpeed = Def.MoveSpeed;
+	// Swapping hero mid-crouch keeps the crouched speed instead of popping back to the standing value.
+	if (CrouchProgress > 0.f) ApplyCrouchPose(FMath::SmoothStep(0.f, 1.f, CrouchProgress));
 	MaxHealth = Def.MaxHealth;
 	Health = Def.MaxHealth;
 }
@@ -195,6 +210,7 @@ void AALHeroCharacter::Tick(float DeltaSeconds)
 	UltCharge = FMath::Min(100.f, UltCharge + DeltaSeconds * 2.f);
 	if (bSkydiving && GetCharacterMovement() && GetCharacterMovement()->IsMovingOnGround()) bSkydiving = false;
 	if (bFireHeld && IsLocallyControlled()) FireOnce();
+	UpdateCrouch(DeltaSeconds);
 	UpdateViewmodel(DeltaSeconds);
 }
 void AALHeroCharacter::Landed(const FHitResult& Hit)
@@ -257,12 +273,14 @@ void AALHeroCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	PlayerInputComponent->BindAction(TEXT("Jump"), IE_Pressed, this, &AALHeroCharacter::OnJump);
 	PlayerInputComponent->BindAction(TEXT("Fire"), IE_Pressed, this, &AALHeroCharacter::OnFire);
 	PlayerInputComponent->BindAction(TEXT("Fire"), IE_Released, this, &AALHeroCharacter::OnFireReleased);
-	PlayerInputComponent->BindAction(TEXT("Crouch"), IE_Pressed, this, &AALHeroCharacter::OnCrouch);
-	PlayerInputComponent->BindAction(TEXT("Crouch"), IE_Released, this, &AALHeroCharacter::OnUnCrouch);
+	PlayerInputComponent->BindAction(TEXT("Crouch"), IE_Pressed, this, &AALHeroCharacter::OnCrouchToggle);
+	PlayerInputComponent->BindAction(TEXT("CrouchHold"), IE_Pressed, this, &AALHeroCharacter::OnCrouchHoldPressed);
+	PlayerInputComponent->BindAction(TEXT("CrouchHold"), IE_Released, this, &AALHeroCharacter::OnCrouchHoldReleased);
 	PlayerInputComponent->BindAction(TEXT("HeroPrev"), IE_Pressed, this, &AALHeroCharacter::HeroPrev);
 	PlayerInputComponent->BindAction(TEXT("HeroNext"), IE_Pressed, this, &AALHeroCharacter::HeroNext);
 }
-void AALHeroCharacter::OnJump() { if (bOnDropship || bSkydiving) DeployFromDropship(); else Jump(); }
+// Jumping out of a crouch stands you up (CoD style); if the head is blocked UpdateCrouch keeps you down anyway.
+void AALHeroCharacter::OnJump() { if (bOnDropship || bSkydiving) DeployFromDropship(); else { bWantsCrouch = false; Jump(); } }
 void AALHeroCharacter::AttachToDropship(AActor* Ship) { if (!Ship) return; bOnDropship = true; AttachToActor(Ship, FAttachmentTransformRules::SnapToTargetNotIncludingScale); }
 void AALHeroCharacter::DeployFromDropship() { bOnDropship = false; bSkydiving = true; DetachFromActor(FDetachmentTransformRules::KeepWorldTransform); LaunchCharacter(FVector(0.f,0.f,-800.f)+GetActorForwardVector()*400.f,true,true); }
 void AALHeroCharacter::OnFire() { bFireHeld = true; FireOnce(); }
@@ -334,25 +352,104 @@ void AALHeroCharacter::RefreshTeamVisuals()
 	Tint(HeadMesh, HeadCol);
 }
 
-void AALHeroCharacter::OnCrouch()
+void AALHeroCharacter::OnCrouchToggle() { SetWantsCrouch(!bWantsCrouch); }
+void AALHeroCharacter::OnCrouchHoldPressed() { SetWantsCrouch(bGamepadHoldToCrouch ? true : !bWantsCrouch); }
+void AALHeroCharacter::OnCrouchHoldReleased() { if (bGamepadHoldToCrouch) SetWantsCrouch(false); }
+void AALHeroCharacter::SetWantsCrouch(bool bCrouch)
 {
-	if (bHoldCrouch) return;
-	bHoldCrouch = true;
-	StandingHalfHeight = GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
-	if (UCharacterMovementComponent* M = GetCharacterMovement())
-	{
-		StandingSpeed = M->MaxWalkSpeed;
-		M->MaxWalkSpeed = CrouchedSpeed;
-	}
-	GetCapsuleComponent()->SetCapsuleHalfHeight(CrouchedHalfHeight);
-	if (FPCamera) FPCamera->SetRelativeLocation(FVector(0.f, 0.f, CrouchedHalfHeight - 12.f));
+	// Attached to the dropship the capsule must not move; the blend picks the request up once we are off it.
+	if (bOnDropship) return;
+	bWantsCrouch = bCrouch;
 }
 
-void AALHeroCharacter::OnUnCrouch()
+void AALHeroCharacter::UpdateCrouch(float DeltaSeconds)
 {
-	if (!bHoldCrouch) return;
-	bHoldCrouch = false;
-	GetCapsuleComponent()->SetCapsuleHalfHeight(StandingHalfHeight);
-	if (UCharacterMovementComponent* M = GetCharacterMovement()) M->MaxWalkSpeed = StandingSpeed;
-	if (FPCamera) FPCamera->SetRelativeLocation(FVector(0.f, 0.f, StandingHalfHeight - 12.f));
+	if (DeltaSeconds <= 0.f) return;
+	// Wanting to stand is not enough: the standing capsule has to fit. While it does not we hold (or return to) the
+	// crouched pose and re-test every frame, so walking out from under a crate stands you up on its own.
+	const bool bHeadBlocked = !bWantsCrouch && CrouchProgress > 0.f && !TryClearStandUpSpace();
+	const float Target = (bWantsCrouch || bHeadBlocked) ? 1.f : 0.f;
+	if (FMath::IsNearlyEqual(CrouchProgress, Target)) return;
+	const float BlendTime = FMath::Max(Target > CrouchProgress ? CrouchDownTime : StandUpTime, 0.01f);
+	SetCrouchProgress(FMath::FInterpConstantTo(CrouchProgress, Target, DeltaSeconds, 1.f / BlendTime));
+}
+
+bool AALHeroCharacter::TryClearStandUpSpace()
+{
+	UWorld* W = GetWorld();
+	UCapsuleComponent* Cap = GetCapsuleComponent();
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	if (!W || !Cap) return true;
+
+	const float Radius = FMath::Max(Cap->GetUnscaledCapsuleRadius() - StandSweepInflation, 1.f);
+	const FCollisionShape Standing = FCollisionShape::MakeCapsule(Radius, FMath::Max(StandingHalfHeight - StandSweepInflation, Radius));
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(ALStandUp), false, this);
+	FCollisionResponseParams Response;
+	Cap->InitSweepCollisionParams(Params, Response);
+	const ECollisionChannel Channel = Cap->GetCollisionObjectType();
+	const FQuat Rot = Cap->GetComponentQuat();
+	const FVector Here = Cap->GetComponentLocation();
+
+	// Airborne the capsule grows around its centre, so test the standing capsule in place.
+	if (!Move || !Move->IsMovingOnGround())
+	{
+		return !W->OverlapBlockingTestByChannel(Here, Rot, Channel, Standing, Params, Response);
+	}
+
+	// On the ground the feet stay planted, so the standing capsule's centre sits higher by the height we gain.
+	const float Rise = StandingHalfHeight - Cap->GetUnscaledCapsuleHalfHeight();
+	FVector StandAt = Here + FVector(0.f, 0.f, Rise);
+	if (!W->OverlapBlockingTestByChannel(StandAt, Rot, Channel, Standing, Params, Response)) return true;
+
+	// Something is just barely overhead. The movement component normally hovers us ~2cm above the floor; settle onto
+	// it and try once more before giving up (mirrors the engine's UnCrouch nudge).
+	const float FloorDist = Move->CurrentFloor.bBlockingHit ? Move->CurrentFloor.FloorDist : 0.f;
+	const float Settle = FloorDist - UE_KINDA_SMALL_NUMBER * 10.f;
+	if (Settle <= 0.f) return false;
+	StandAt.Z -= Settle;
+	if (W->OverlapBlockingTestByChannel(StandAt, Rot, Channel, Standing, Params, Response)) return false;
+	Cap->MoveComponent(FVector(0.f, 0.f, -Settle), Rot, false, nullptr, MOVECOMP_NoFlags, ETeleportType::TeleportPhysics);
+	Move->bForceNextFloorCheck = true;
+	return true;
+}
+
+void AALHeroCharacter::SetCrouchProgress(float NewProgress)
+{
+	CrouchProgress = FMath::Clamp(NewProgress, 0.f, 1.f);
+	// Ease in/out so the camera settles instead of stopping dead at either end.
+	const float Eased = FMath::SmoothStep(0.f, 1.f, CrouchProgress);
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	if (UCapsuleComponent* Cap = GetCapsuleComponent())
+	{
+		const float NewHalfHeight = FMath::Lerp(StandingHalfHeight, CrouchedHalfHeight, Eased);
+		const float Delta = NewHalfHeight - Cap->GetUnscaledCapsuleHalfHeight();
+		const bool bGrounded = Move && Move->IsMovingOnGround();
+		Cap->SetCapsuleHalfHeight(NewHalfHeight, true);
+		// The capsule is centred on the actor, so on the ground every height change is paired with an equal vertical
+		// move to keep the feet planted: shrinking never lifts us off the floor and growing never pushes the feet into
+		// it (which is what used to wedge the player between floor and ceiling). Shrinking sweeps down onto the floor;
+		// growing was already cleared by TryClearStandUpSpace, and each partial capsule sits inside the standing one.
+		if (bGrounded && !FMath::IsNearlyZero(Delta))
+		{
+			Cap->MoveComponent(FVector(0.f, 0.f, Delta), Cap->GetComponentQuat(), Delta < 0.f, nullptr, MOVECOMP_NoFlags, ETeleportType::TeleportPhysics);
+			if (Move) Move->bForceNextFloorCheck = true;
+		}
+	}
+	ApplyCrouchPose(Eased);
+}
+
+void AALHeroCharacter::ApplyCrouchPose(float Eased)
+{
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Move->MaxWalkSpeed = FMath::Lerp(StandingSpeed, StandingSpeed * CrouchSpeedScale, Eased);
+	}
+	// Eye stays inside the capsule in both poses (top is 24cm / 12cm above it), so it can never end up inside a prop.
+	if (FPCamera) FPCamera->SetRelativeLocation(FVector(0.f, 0.f, FMath::Lerp(StandingEyeZ, CrouchedEyeZ, Eased)));
+	if (HeadMesh) HeadMesh->SetRelativeLocation(FVector(0.f, 0.f, FMath::Lerp(HeadStandZ, HeadCrouchZ, Eased)));
+	if (BodyMesh)
+	{
+		BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, FMath::Lerp(BodyStandZ, BodyCrouchZ, Eased)));
+		BodyMesh->SetRelativeScale3D(FVector(0.62f, 0.62f, FMath::Lerp(BodyStandScaleZ, BodyCrouchScaleZ, Eased)));
+	}
 }

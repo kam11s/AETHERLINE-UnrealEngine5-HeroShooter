@@ -74,14 +74,36 @@ public:
 	UPROPERTY(EditAnywhere, Category="Viewmodel") float LandDipCm = 6.f;
 	UPROPERTY(EditAnywhere, Category="Viewmodel") float ViewKickScale = 0.005f;
 
+	// Crouch is a blend, not a snap: capsule half-height, FP eye height and walk speed all interpolate between the
+	// Standing* / Crouched* values over CrouchDownTime / StandUpTime. Standing up is gated on a capsule overlap test
+	// so the player is never grown into a ceiling or crate gap; while blocked they stay crouched and stand as soon
+	// as the space is clear.
+	UPROPERTY(EditAnywhere, Category="Crouch") float StandingHalfHeight = 88.f;
+	UPROPERTY(EditAnywhere, Category="Crouch") float CrouchedHalfHeight = 52.f;
+	UPROPERTY(EditAnywhere, Category="Crouch") float StandingEyeZ = 64.f;
+	UPROPERTY(EditAnywhere, Category="Crouch") float CrouchedEyeZ = 40.f;
+	UPROPERTY(EditAnywhere, Category="Crouch") float CrouchDownTime = 0.22f;
+	UPROPERTY(EditAnywhere, Category="Crouch") float StandUpTime = 0.26f;
+	UPROPERTY(EditAnywhere, Category="Crouch") float CrouchSpeedScale = 0.47f;
+	// "CrouchHold" action (gamepad B by default): true = crouch only while held, false = toggle like mouse + keyboard.
+	UPROPERTY(EditAnywhere, Category="Crouch") bool bGamepadHoldToCrouch = true;
+
 	FVector GetMuzzleLocation() const;
 
 protected:
 	void OnJump();
 	void OnFire();
 	void OnFireReleased();
-	void OnCrouch();
-	void OnUnCrouch();
+	// "Crouch" action: toggle (mouse + keyboard). "CrouchHold" action: hold or toggle per bGamepadHoldToCrouch.
+	void OnCrouchToggle();
+	void OnCrouchHoldPressed();
+	void OnCrouchHoldReleased();
+	void SetWantsCrouch(bool bCrouch);
+	void UpdateCrouch(float DeltaSeconds);
+	void SetCrouchProgress(float NewProgress);
+	void ApplyCrouchPose(float Eased);
+	// True when the full standing capsule fits where it would end up. May settle the capsule onto the floor first.
+	bool TryClearStandUpSpace();
 	void UpdateViewmodel(float DeltaSeconds);
 	// Constructor-only: creates one gun part under GunRoot. Size is in cm (BasicShapes are 100cm).
 	UStaticMeshComponent* MakeGunPart(const TCHAR* Name, UStaticMesh* Mesh, const FVector& Center, const FVector& Size, const FRotator& Rotation);
@@ -101,11 +123,12 @@ protected:
 	UPROPERTY() TObjectPtr<UMaterialInterface> GunBaseMaterial;
 	float FireCooldown = 0.f;
 	bool bFireHeld = false;
-	bool bHoldCrouch = false;
-	float StandingHalfHeight = 88.f;
-	float CrouchedHalfHeight = 52.f;
+	// Requested crouch state (input) vs. blend progress 0 = standing, 1 = crouched. They differ mid-blend and while
+	// standing up is blocked by geometry.
+	bool bWantsCrouch = false;
+	float CrouchProgress = 0.f;
+	// Hero walk speed; MaxWalkSpeed is derived from this and the crouch blend.
 	float StandingSpeed = 600.f;
-	float CrouchedSpeed = 280.f;
 	EALTeam VisualTeam = EALTeam::None;
 	float GunKick = 0.f;
 	float GunLandDip = 0.f;
