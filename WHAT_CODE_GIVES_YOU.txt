@@ -3,7 +3,8 @@ What GitHub/code gives you (no extra dragging):
 - Gun mesh on the camera (Play to see it)
 - Teal tracers when you shoot
 - HUD: RAVELIN, health, ult, score
-- Teal/amber yard + bots on Play
+- Teal/amber industrial yard on Play: containers, crate stacks, barriers,
+  pipe racks, catwalks with ramps, pillars, night lights + bots
 - Keyboard + gamepad
 
 What you build in the editor:
