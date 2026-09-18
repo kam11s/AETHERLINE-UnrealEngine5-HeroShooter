@@ -10,6 +10,11 @@
 #include "ALGameInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
+
+static TAutoConsoleVariable<int32> CVarALBots(
+	TEXT("al.Bots"), -1,
+	TEXT("Total bot count for skirmish playlists (-1 = GameMode BotFill). Read when the match starts."));
 
 AALGameMode::AALGameMode()
 {
@@ -81,14 +86,36 @@ void AALGameMode::StartBattleRoyale()
 void AALGameMode::SpawnBots()
 {
 	UWorld* W = GetWorld(); if (!W) return;
-	for (int32 i = 0; i < BotFill; ++i)
+	const int32 Override = CVarALBots.GetValueOnGameThread();
+	const int32 Total = FMath::Clamp(Override >= 0 ? Override : BotFill, 0, 64);
+	const int32 Allies = FMath::Clamp(AllyBotFill, 0, Total);
+	FActorSpawnParameters SP;
+	SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	for (int32 i = 0; i < Total; ++i)
 	{
-		const FVector Loc(FMath::FRandRange(-1800.f,1800.f), FMath::FRandRange(-1800.f,1800.f), 120.f);
-		AALHeroCharacter* Bot = W->SpawnActor<AALHeroCharacter>(AALHeroCharacter::StaticClass(), Loc, FRotator::ZeroRotator);
+		const EALTeam Team = (i < Total - Allies) ? EALTeam::Enemy : EALTeam::Ally;
+		const FVector Loc = FindSpawnLocation(Team);
+		const FRotator Rot(0.f, FMath::FRandRange(-180.f, 180.f), 0.f);
+		AALHeroCharacter* Bot = W->SpawnActor<AALHeroCharacter>(AALHeroCharacter::StaticClass(), Loc, Rot, SP);
 		if (!Bot) continue;
-		Bot->TeamId = (i%2==0)? EALTeam::Enemy : EALTeam::Ally;
+		Bot->TeamId = Team;
 		Bot->ApplyHero(static_cast<EALHero>(i%6));
-		if (AALHeroAIController* AIC = W->SpawnActor<AALHeroAIController>(AALHeroAIController::StaticClass(), Loc, FRotator::ZeroRotator)) AIC->Possess(Bot);
+		if (AALHeroAIController* AIC = W->SpawnActor<AALHeroAIController>(AALHeroAIController::StaticClass(), Loc, Rot, SP)) AIC->Possess(Bot);
 	}
+}
+FVector AALGameMode::FindSpawnLocation(EALTeam Team) const
+{
+	FVector Center = FVector::ZeroVector;
+	if (const APawn* P = UGameplayStatics::GetPlayerPawn(GetWorld(), 0)) Center = FVector(P->GetActorLocation().X, P->GetActorLocation().Y, 0.f);
+	float Bound = 3800.f;
+	for (TActorIterator<AALArenaBuilder> It(GetWorld()); It; ++It) { Bound = It->Size - 400.f; break; }
+	const bool bHostile = Team == EALTeam::Enemy;
+	const float R = bHostile ? FMath::FRandRange(2000.f, 2800.f) : FMath::FRandRange(500.f, 900.f);
+	const float A = FMath::FRandRange(0.f, 2.f * PI);
+	FVector Loc = Center + FVector(FMath::Cos(A) * R, FMath::Sin(A) * R, 0.f);
+	Loc.X = FMath::Clamp(Loc.X, -Bound, Bound);
+	Loc.Y = FMath::Clamp(Loc.Y, -Bound, Bound);
+	Loc.Z = 120.f;
+	return Loc;
 }
 AActor* AALGameMode::ChoosePlayerStart_Implementation(AController* Player) { return Super::ChoosePlayerStart_Implementation(Player); }
