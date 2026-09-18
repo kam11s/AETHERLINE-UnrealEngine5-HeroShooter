@@ -1,6 +1,6 @@
 What GitHub/code gives you (no extra dragging):
 - First-person pawn + camera
-- FP gun on the camera: teal barrel, amber sight, bob / look sway / recoil kick (Play to see it)
+- FP gun on the camera: carbine silhouette from BasicShapes (receiver, grip, mag, teal barrel, amber sights), bob / look sway / recoil kick (Play to see it)
 - Hold LMB or right trigger to auto-fire; teal tracers leave the muzzle
 - HUD: RAVELIN, health, ult, score
 - Teal/amber yard + bots on Play

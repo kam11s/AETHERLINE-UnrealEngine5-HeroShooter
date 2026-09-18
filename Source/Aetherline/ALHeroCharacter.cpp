@@ -5,34 +5,62 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
+#include "UObject/ConstructorHelpers.h"
 
 namespace
 {
-	// Gun parts in GunRoot space (cm). Cube.Cube is 100cm, so scale = size / 100.
-	const FVector GunBodySize(44.f, 15.f, 18.f);
-	const FVector GunBodyCenter(20.f, 0.f, 0.f);
-	const FVector GunBarrelSize(36.f, 6.f, 6.f);
-	const FVector GunBarrelCenter(56.f, 0.f, 3.f);
-	const FVector GunSightSize(6.f, 3.f, 3.f);
-	const FVector GunSightCenter(12.f, 0.f, 10.5f);
-	const FVector GunMuzzleLocal(74.f, 0.f, 3.f);
+	// Compact carbine built from Engine BasicShapes, laid out in GunRoot space (cm).
+	// X runs down the barrel, origin is the rear-bottom corner of the receiver, so the receiver's rear face
+	// sits exactly GunRestLocation.X in front of the camera. The camera sits above-left of the gun, so it sees
+	// the top and left faces: a stepped profile (receiver -> forend -> barrel -> muzzle), parts hanging below
+	// (grip, magazine) and parts on top (rail, sights) are what make the wedge read as a weapon.
+	//
+	//                 rear sight        rail                          front sight
+	//                    [ ]  ============================               |
+	//  camera ->   +---------------------------------+------------+======#==+  muzzle
+	//              |            receiver             |   forend   |  barrel
+	//              +----+---------------+------------+------------+
+	//                    \ grip \        | mag |
+	//                     \      \       |     |
+	const FVector ReceiverSize(38.f, 7.5f, 9.f);
+	const FVector ReceiverCenter(19.f, 0.f, 4.5f);
+	const FVector GripSize(5.f, 4.f, 14.f);
+	const FVector GripCenter(7.f, 0.f, -6.f);
+	const FRotator GripTilt(-18.f, 0.f, 0.f); // bottom of the grip rakes back toward the camera
+	const FVector MagazineSize(4.5f, 3.5f, 13.f);
+	const FVector MagazineCenter(19.f, 0.f, -5.5f);
+	const FRotator MagazineTilt(7.f, 0.f, 0.f); // bottom of the magazine leans forward
+	const FVector ForendSize(12.f, 6.f, 5.5f);
+	const FVector ForendCenter(44.f, 0.f, 4.75f);
+	// Cylinder.Cylinder runs along its local Z, so cylinder sizes are (diameter, diameter, length) and the part
+	// is pitched 90 degrees to lay that length along the barrel axis (X).
+	const FRotator AlongX(90.f, 0.f, 0.f);
+	const FVector BarrelSize(3.4f, 3.4f, 26.f);   // 26cm long, X 50..76
+	const FVector BarrelCenter(63.f, 0.f, 6.f);
+	const FVector MuzzleSize(5.f, 5.f, 5.f);      // X 75..80
+	const FVector MuzzleCenter(77.5f, 0.f, 6.f);
+	const FVector RailSize(32.f, 3.f, 1.5f);
+	const FVector RailCenter(22.f, 0.f, 9.75f);
+	const FVector RearSightSize(2.f, 2.5f, 2.5f);
+	const FVector RearSightCenter(3.f, 0.f, 10.25f);
+	const FVector FrontSightSize(1.5f, 1.5f, 4.f);
+	const FVector FrontSightCenter(73.f, 0.f, 9.5f); // top at Z=11.5, level with the rear sight
+	const FVector GunMuzzleLocal(80.5f, 0.f, 6.f);
 
-	void SetupGunPart(UStaticMeshComponent* Part, UStaticMesh* Cube, const FVector& Center, const FVector& Size)
-	{
-		if (!Part) return;
-		Part->SetRelativeLocation(Center);
-		Part->SetRelativeScale3D(Size / 100.f);
-		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Part->SetGenerateOverlapEvents(false);
-		Part->SetCastShadow(false);
-		if (Cube) Part->SetStaticMesh(Cube);
-	}
+	// Palette: graphite body, gunmetal grip/forend, dark teal accents, amber sights.
+	const FLinearColor GunGraphite(0.07f, 0.08f, 0.09f);
+	const FLinearColor GunSteel(0.11f, 0.12f, 0.13f);
+	const FLinearColor GunDarkTeal(0.04f, 0.19f, 0.23f);
+	const FLinearColor GunTeal(0.05f, 0.26f, 0.30f);
+	const FLinearColor GunNearBlack(0.02f, 0.025f, 0.03f);
+	const FLinearColor GunAmber(0.89f, 0.60f, 0.18f);
 
 	void TintGunPart(UStaticMeshComponent* Part, UMaterialInterface* Base, UObject* Outer, const FLinearColor& Color)
 	{
@@ -68,16 +96,36 @@ AALHeroCharacter::AALHeroCharacter()
 	GunRoot->SetRelativeLocation(GunRestLocation);
 	GunRoot->SetRelativeRotation(GunRestRotation);
 
-	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-	GunMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GunMesh"));
-	GunMesh->SetupAttachment(GunRoot);
-	SetupGunPart(GunMesh, Cube, GunBodyCenter, GunBodySize);
-	GunBarrel = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GunBarrel"));
-	GunBarrel->SetupAttachment(GunRoot);
-	SetupGunPart(GunBarrel, Cube, GunBarrelCenter, GunBarrelSize);
-	GunSight = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GunSight"));
-	GunSight->SetupAttachment(GunRoot);
-	SetupGunPart(GunSight, Cube, GunSightCenter, GunSightSize);
+	// FObjectFinder is the constructor-safe way to reference Engine assets (LoadObject here failed silently).
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UMaterial> BasicMaterialFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	UStaticMesh* Cube = CubeFinder.Object;
+	UStaticMesh* Cylinder = CylinderFinder.Object ? CylinderFinder.Object : Cube;
+	GunBaseMaterial = BasicMaterialFinder.Object;
+
+	GunMesh = MakeGunPart(TEXT("GunMesh"), Cube, ReceiverCenter, ReceiverSize, FRotator::ZeroRotator);
+	GunGrip = MakeGunPart(TEXT("GunGrip"), Cube, GripCenter, GripSize, GripTilt);
+	GunMagazine = MakeGunPart(TEXT("GunMagazine"), Cube, MagazineCenter, MagazineSize, MagazineTilt);
+	GunForend = MakeGunPart(TEXT("GunForend"), Cube, ForendCenter, ForendSize, FRotator::ZeroRotator);
+	GunBarrel = MakeGunPart(TEXT("GunBarrel"), Cylinder, BarrelCenter, BarrelSize, AlongX);
+	GunMuzzle = MakeGunPart(TEXT("GunMuzzle"), Cylinder, MuzzleCenter, MuzzleSize, AlongX);
+	GunRail = MakeGunPart(TEXT("GunRail"), Cube, RailCenter, RailSize, FRotator::ZeroRotator);
+	GunRearSight = MakeGunPart(TEXT("GunRearSight"), Cube, RearSightCenter, RearSightSize, FRotator::ZeroRotator);
+	GunSight = MakeGunPart(TEXT("GunSight"), Cube, FrontSightCenter, FrontSightSize, FRotator::ZeroRotator);
+}
+UStaticMeshComponent* AALHeroCharacter::MakeGunPart(const TCHAR* Name, UStaticMesh* Mesh, const FVector& Center, const FVector& Size, const FRotator& Rotation)
+{
+	UStaticMeshComponent* Part = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+	Part->SetupAttachment(GunRoot);
+	Part->SetRelativeLocation(Center);
+	Part->SetRelativeRotation(Rotation);
+	Part->SetRelativeScale3D(Size / 100.f);
+	Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Part->SetGenerateOverlapEvents(false);
+	Part->SetCastShadow(false);
+	if (Mesh) Part->SetStaticMesh(Mesh);
+	return Part;
 }
 void AALHeroCharacter::BeginPlay()
 {
@@ -85,11 +133,17 @@ void AALHeroCharacter::BeginPlay()
 	const FRotator Ctrl = GetControlRotation();
 	LastControlYaw = static_cast<float>(Ctrl.Yaw);
 	LastControlPitch = static_cast<float>(Ctrl.Pitch);
-	if (UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")))
+	if (UMaterialInterface* Base = GunBaseMaterial.Get())
 	{
-		TintGunPart(GunMesh, Base, this, FLinearColor(0.035f, 0.045f, 0.055f));
-		TintGunPart(GunBarrel, Base, this, FLinearColor(0.05f, 0.22f, 0.26f));
-		TintGunPart(GunSight, Base, this, FLinearColor(0.89f, 0.60f, 0.18f));
+		TintGunPart(GunMesh, Base, this, GunGraphite);
+		TintGunPart(GunGrip, Base, this, GunSteel);
+		TintGunPart(GunMagazine, Base, this, GunDarkTeal);
+		TintGunPart(GunForend, Base, this, GunSteel);
+		TintGunPart(GunBarrel, Base, this, GunTeal);
+		TintGunPart(GunMuzzle, Base, this, GunNearBlack);
+		TintGunPart(GunRail, Base, this, GunDarkTeal);
+		TintGunPart(GunRearSight, Base, this, GunAmber);
+		TintGunPart(GunSight, Base, this, GunAmber);
 	}
 }
 FVector AALHeroCharacter::GetMuzzleLocation() const
