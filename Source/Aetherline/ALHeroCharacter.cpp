@@ -12,6 +12,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
@@ -76,6 +77,34 @@ namespace
 	// Overlap tests use a capsule shrunk by this much so resting contact with floor / walls does not count as a block
 	// (same trick as UCharacterMovementComponent::UnCrouch).
 	const float StandSweepInflation = 0.1f;
+
+	// The kick spring is kept under-damped so the closed-form solution below applies (and so it overshoots a touch).
+	const float KickMinDamping = 0.05f;
+	const float KickMaxDamping = 0.95f;
+
+	// Velocity impulse that makes a damped spring (natural frequency Omega rad/s, damping ratio Zeta) starting at
+	// rest peak at exactly 1.0. Lets the kick be tuned in "peak displacement" rather than raw velocity.
+	float SpringUnitImpulse(float Omega, float Zeta)
+	{
+		const float Wd = Omega * FMath::Sqrt(1.f - Zeta * Zeta);
+		const float PeakTime = FMath::Atan2(Wd, Zeta * Omega) / Wd;
+		const float Peak = FMath::Exp(-Zeta * Omega * PeakTime) * FMath::Sin(Wd * PeakTime) / Wd;
+		return 1.f / FMath::Max(Peak, UE_KINDA_SMALL_NUMBER);
+	}
+
+	// Advances a damped spring by Dt using the exact under-damped solution, so the result is frame-rate independent
+	// and cannot blow up on a hitch (a plain Euler step at 60fps over-damps the first frame by ~half).
+	void StepDampedSpring(float& X, float& V, float Omega, float Zeta, float Dt)
+	{
+		const float Wd = Omega * FMath::Sqrt(1.f - Zeta * Zeta);
+		const float Decay = FMath::Exp(-Zeta * Omega * Dt);
+		const float C = FMath::Cos(Wd * Dt);
+		const float S = FMath::Sin(Wd * Dt);
+		const float NewX = Decay * (X * C + (V + Zeta * Omega * X) / Wd * S);
+		const float NewV = Decay * (V * C - (Omega * Omega * X + Zeta * Omega * V) / Wd * S);
+		X = NewX;
+		V = NewV;
+	}
 
 	void TintGunPart(UStaticMeshComponent* Part, UMaterialInterface* Base, UObject* Outer, const FLinearColor& Color)
 	{
@@ -183,6 +212,10 @@ FVector AALHeroCharacter::GetMuzzleLocation() const
 	if (GunRoot) return GunRoot->GetComponentTransform().TransformPosition(GunMuzzleLocal);
 	return GetActorLocation() + GetActorForwardVector() * 60.f;
 }
+FVector AALHeroCharacter::GetEyeLocation() const
+{
+	return FPCamera ? FPCamera->GetComponentLocation() : GetActorLocation() + FVector(0.f, 0.f, StandingEyeZ);
+}
 void AALHeroCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -211,7 +244,51 @@ void AALHeroCharacter::Tick(float DeltaSeconds)
 	if (bSkydiving && GetCharacterMovement() && GetCharacterMovement()->IsMovingOnGround()) bSkydiving = false;
 	if (bFireHeld && IsLocallyControlled()) FireOnce();
 	UpdateCrouch(DeltaSeconds);
+	UpdateViewKick(DeltaSeconds);
 	UpdateViewmodel(DeltaSeconds);
+}
+void AALHeroCharacter::AddFireKick(float Heft)
+{
+	// Viewmodel: velocity impulse into the spring, capped at one full-heft shot so a burst cannot wind it up past
+	// the pose the rest location was cleared for (see GunRestLocation). A returning gun (negative velocity) soaks up
+	// part of the next impulse, which is what gives sustained fire its rhythm.
+	const float Omega = 2.f * PI * FMath::Max(KickFrequencyHz, 0.1f);
+	const float UnitImpulse = SpringUnitImpulse(Omega, FMath::Clamp(KickDampingRatio, KickMinDamping, KickMaxDamping));
+	GunKickVel = FMath::Min(GunKickVel + Heft * UnitImpulse, UnitImpulse);
+	// Re-roll the sideways direction but keep some of the last one so it drifts rather than jitters.
+	KickSide = FMath::Lerp(KickSide, FMath::FRandRange(-1.f, 1.f), 0.6f);
+
+	// Camera: queue the climb; UpdateViewKick eases the control rotation toward it and back. Bots keep the
+	// viewmodel kick (others can see their gun) but never have their aim pushed around.
+	if (!Cast<APlayerController>(GetController())) return;
+	const float Kick = FMath::Lerp(ViewKickLightDeg, ViewKickHeavyDeg, Heft);
+	ViewKickPitchTarget = FMath::Min(ViewKickPitchTarget + Kick, FMath::Max(ViewKickClimbMaxDeg, Kick));
+	ViewKickYawTarget += FMath::FRandRange(-1.f, 1.f) * Kick * ViewKickYawFraction;
+}
+void AALHeroCharacter::UpdateViewKick(float DeltaSeconds)
+{
+	if (DeltaSeconds <= 0.f || !IsLocallyControlled()) return;
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		ViewKickPitch = ViewKickYaw = ViewKickPitchTarget = ViewKickYawTarget = 0.f;
+		return;
+	}
+	const float PrevPitch = ViewKickPitch;
+	const float PrevYaw = ViewKickYaw;
+	ViewKickPitch = FMath::FInterpTo(ViewKickPitch, ViewKickPitchTarget, DeltaSeconds, ViewKickSnapSpeed);
+	ViewKickYaw = FMath::FInterpTo(ViewKickYaw, ViewKickYawTarget, DeltaSeconds, ViewKickSnapSpeed);
+	ViewKickPitchTarget = FMath::FInterpTo(ViewKickPitchTarget, 0.f, DeltaSeconds, ViewKickRecoverSpeed);
+	ViewKickYawTarget = FMath::FInterpTo(ViewKickYawTarget, 0.f, DeltaSeconds, ViewKickRecoverSpeed);
+	const float DeltaPitch = ViewKickPitch - PrevPitch;
+	const float DeltaYaw = ViewKickYaw - PrevYaw;
+	if (FMath::IsNearlyZero(DeltaPitch, 1e-4f) && FMath::IsNearlyZero(DeltaYaw, 1e-4f)) return;
+	// Only the frame-to-frame change is applied, so the player's own look input passes straight through and the
+	// pitch limits in the camera manager still apply on the next controller update.
+	FRotator Ctrl = PC->GetControlRotation();
+	Ctrl.Pitch += DeltaPitch;
+	Ctrl.Yaw += DeltaYaw;
+	PC->SetControlRotation(Ctrl);
 }
 void AALHeroCharacter::Landed(const FHitResult& Hit)
 {
@@ -224,7 +301,9 @@ void AALHeroCharacter::UpdateViewmodel(float DeltaSeconds)
 	UWorld* W = GetWorld();
 	if (!W || !GunRoot || !IsLocallyControlled() || DeltaSeconds <= 0.f) return;
 
-	GunKick = FMath::FInterpTo(GunKick, 0.f, DeltaSeconds, KickRecoverSpeed);
+	// Kick spring. Zero is the rest pose; shots push GunKick positive through GunKickVel (AddFireKick).
+	StepDampedSpring(GunKick, GunKickVel, 2.f * PI * FMath::Max(KickFrequencyHz, 0.1f),
+		FMath::Clamp(KickDampingRatio, KickMinDamping, KickMaxDamping), DeltaSeconds);
 	GunLandDip = FMath::FInterpTo(GunLandDip, 0.f, DeltaSeconds, 6.f);
 
 	// Look sway: the gun lags behind the camera by an amount proportional to turn rate.
@@ -251,12 +330,17 @@ void AALHeroCharacter::UpdateViewmodel(float DeltaSeconds)
 	const float BobZ = FMath::Sin(BobTime * 2.f) * BobAmplitude * 0.5f * BobBlend;
 	const float Breath = FMath::Sin(static_cast<float>(W->GetTimeSeconds()) * 1.4f) * 0.25f;
 
+	// Kick: straight back into the shoulder, a little up, muzzle pitches up; a small sideways share (lateral shove,
+	// yaw, roll) in the direction rolled for this shot keeps a burst from pumping in a perfectly straight line.
+	const float SideKick = GunKick * KickSide * KickSideFraction;
 	const float OffX = -GunKick * KickBackCm;
-	const float OffY = static_cast<float>(SwayRot.Yaw) * 0.12f + BobY;
-	const float OffZ = BobZ + Breath + GunKick * 0.8f - GunLandDip * LandDipCm;
+	const float OffY = static_cast<float>(SwayRot.Yaw) * 0.12f + BobY + SideKick * KickBackCm;
+	const float OffZ = BobZ + Breath + GunKick * KickBackCm * 0.15f - GunLandDip * LandDipCm;
 	const float TiltPitch = static_cast<float>(SwayRot.Pitch) + GunKick * KickPitchDeg - GunLandDip * 3.f;
+	const float TiltYaw = static_cast<float>(SwayRot.Yaw) + SideKick * KickPitchDeg;
+	const float TiltRoll = static_cast<float>(SwayRot.Roll) + SideKick * KickPitchDeg;
 	const FVector Offset(OffX, OffY, OffZ);
-	const FRotator Tilt(TiltPitch, static_cast<float>(SwayRot.Yaw), static_cast<float>(SwayRot.Roll));
+	const FRotator Tilt(TiltPitch, TiltYaw, TiltRoll);
 	GunRoot->SetRelativeLocation(GunRestLocation + Offset);
 	GunRoot->SetRelativeRotation(GunRestRotation + Tilt);
 }
@@ -296,39 +380,43 @@ void AALHeroCharacter::HeroPrev() { ApplyHero(static_cast<EALHero>((static_cast<
 void AALHeroCharacter::HeroNext() { ApplyHero(static_cast<EALHero>((static_cast<int32>(HeroId)+1)%6)); }
 void AALHeroCharacter::FireOnce()
 {
-	if (FireCooldown > 0.f || !IsAlive() || !GetWorld()) return;
+	const FVector Dir = FPCamera ? FPCamera->GetForwardVector() : GetActorForwardVector();
+	FireShot(Dir, 1.f);
+}
+bool AALHeroCharacter::FireShot(const FVector& Dir, float DamageScale)
+{
+	if (FireCooldown > 0.f || !IsAlive() || !GetWorld()) return false;
 	const FALHeroDef Def = UALHeroCatalog::Get(HeroId);
 	FireCooldown = 1.f / FMath::Max(Def.FireRate, 0.1f);
-	const FVector Start = FPCamera ? FPCamera->GetComponentLocation() : GetActorLocation();
-	const FVector Dir = FPCamera ? FPCamera->GetForwardVector() : GetActorForwardVector();
+	const FVector Start = GetEyeLocation();
 	const FVector End = Start + Dir * Def.Range;
 	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(ALFire), false, this);
 	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
 	const FVector TracerEnd = bHit ? Hit.ImpactPoint : End;
 	const FVector Muzzle = GetMuzzleLocation();
-	DrawDebugLine(GetWorld(), Muzzle, TracerEnd, FColor(40, 220, 255), false, 0.08f, 0, 2.0f);
+	// Teal = friendly fire lanes, amber = hostile, so incoming fire reads at a glance.
+	const FColor Tracer = (TeamId == EALTeam::Enemy) ? FColor(255, 150, 40) : FColor(40, 220, 255);
+	DrawDebugLine(GetWorld(), Muzzle, TracerEnd, Tracer, false, 0.08f, 0, 2.0f);
 	DrawDebugPoint(GetWorld(), Muzzle, 22.f, FColor(255, 170, 50), false, 0.05f);
 	if (bHit)
 	{
-		DrawDebugPoint(GetWorld(), Hit.ImpactPoint, 10.f, FColor(255, 160, 40), false, 0.12f);
-		if (AALHeroCharacter* Other = Cast<AALHeroCharacter>(Hit.GetActor()))
-		{
-			if (Other->TeamId != TeamId) ServerApplyDamageTo(Other, Def.Damage);
-		}
+		AALHeroCharacter* Other = Cast<AALHeroCharacter>(Hit.GetActor());
+		DrawDebugPoint(GetWorld(), Hit.ImpactPoint, Other ? 18.f : 10.f, Other ? FColor::White : FColor(255, 160, 40), false, 0.12f);
+		if (Other && Other->TeamId != TeamId) ServerApplyDamageTo(Other, Def.Damage * DamageScale);
 	}
-	// Heavier hitters kick harder, both on the viewmodel and on the camera.
-	const float Heft = FMath::Clamp(Def.Damage / 70.f, 0.25f, 1.f);
-	GunKick = FMath::Min(1.f, GunKick + Heft);
-	const float ViewKick = FMath::Clamp(Def.Damage * ViewKickScale, 0.05f, 0.35f);
-	AddControllerPitchInput(-ViewKick);
-	AddControllerYawInput(FMath::FRandRange(-0.25f, 0.25f) * ViewKick);
+	// Heavier hitters kick harder: the carbine-class heroes sit at the light end, Bastion at the heavy end.
+	if (IsLocallyControlled()) AddFireKick(FMath::Clamp(Def.Damage / 60.f, 0.3f, 1.f));
+	return true;
 }
 void AALHeroCharacter::ServerApplyDamageTo_Implementation(AALHeroCharacter* Target, float Amount)
 {
 	if (!HasAuthority() || !Target || !Target->IsAlive()) return;
 	if (Target->TeamId == TeamId) return;
+	const float Now = GetWorld() ? static_cast<float>(GetWorld()->GetTimeSeconds()) : 0.f;
 	Target->Health = FMath::Max(0.f, Target->Health - Amount);
+	Target->LastDamagedTime = Now;
+	LastHitConfirmTime = Now;
 }
 
 void AALHeroCharacter::RefreshTeamVisuals()
