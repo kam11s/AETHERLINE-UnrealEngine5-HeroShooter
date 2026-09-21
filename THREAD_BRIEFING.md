@@ -1,44 +1,23 @@
-# Briefing for other Grok bots (updated 2026-09-21)
+# Briefing for other Grok bots (updated 2026-09-21 late)
 
-This file is the shared memory of the main Ravelin thread. Other bots cannot see that chat. Read this plus AGENTS.md and COMPILE_RULES.txt before editing.
+Read AGENTS.md and COMPILE_RULES.txt first.
 
 ## Identity
 - Public name: RAVELIN
-- Internal C++ module: Aetherline (do not rename)
-- Engine: Unreal Engine 5.8.2
+- Module: Aetherline (do not rename)
+- Engine: UE 5.8.2
 - Repo: kam11s/AETHERLINE-UnrealEngine5-HeroShooter
-- Do not use kam11s/Aetherline (old GAS / Enhanced Input repo)
+- Ignore kam11s/Aetherline (GAS / Enhanced Input graveyard)
 
-## What works on main
-- Project compiles. Play works.
-- FP gun, teal tracers, HUD (RAVELIN, health, ult, score).
-- Night teal/amber yard spawned at Play by ALGameMode / ALArenaBuilder.
-- Desktop shortcut RAVELIN opens the editor project, not a Steam exe.
-- main HEAD is the compile-safe spine. Do not fast-forward it to a cursor/* branch without the main thread.
+## main today
+Compile-safe spine plus a skirmish rematch loop (clock or ScoreToWin -> MATCH OVER -> clear AI bots -> StartPlaylist BotSkirmish).
+Do not merge cursor/* into main without the main thread.
 
-## Cursor draft PRs (DO NOT MERGE THE STACK)
-Open draft PRs #1-#8 on branches named cursor/*. They are notes + unmerged C++.
-#8 is based on #7, not main. #5 (live AI bots) is the first candidate if we merge one.
-#5 Build.cs was checked: unchanged. No GAS / Enhanced Input.
-Those PRs were not compiled in UE 5.8 by the agent that wrote them.
-
-## What is local only (not on GitHub main)
-- RavelinYard.umap and dressed gun/map work on the owner's PC.
-- Untitled tab in the editor is normal; Play rebuilds the yard from C++.
-- HOSTILES 5 / shaped gun the owner already plays may be local + cursor branches, not main.
-- Do not tell the owner to delete D:\\Aetherline to "sync."
-- Do not git checkout cursor/* over the live project without a copy.
+## Cursor draft stack
+#5 bots -> #6 carbine/full-auto -> #7 crouch blend -> #8 recoil/assist.
+Build.cs clean on those branches. Not compiled in a real 5.8 editor by the authoring agent.
+Owner already plays HOSTILES 5 locally. Do not git checkout cursor branches over D:\\Aetherline.
 
 ## Scope
-Order: feel → place → loop → package → store → live.
-Publisher is a later goal after a packaged Windows slice friends can run.
-Finish skirmish rematch before shop / battle pass / Worldpay / 21-player BR.
-
-## Compile lock
-- BuildSettingsVersion.V7 both Target.cs
-- Build.cs modules only: Core, CoreUObject, Engine, InputCore, UMG, AIModule
-- Legacy input only (DefaultInput.ini). No Enhanced Input. No GAS.
-- Named UFUNCTION params. Keep EALDropPhase and ALGameState.h.
-
-## How work merges
-Editor/art can stay on disk. Source/Config changes: one PR at a time, reviewed in the main thread, then merge.
+feel -> place -> loop -> package -> store -> live.
+Publisher after a packaged Windows slice.

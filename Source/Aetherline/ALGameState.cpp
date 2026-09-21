@@ -11,5 +11,7 @@ void AALGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(AALGameState, SquadSize);
 	DOREPLIFETIME(AALGameState, CircleRadius);
 	DOREPLIFETIME(AALGameState, DropPhase);
+	DOREPLIFETIME(AALGameState, bMatchOver);
+	DOREPLIFETIME(AALGameState, WinnerSide);
 }
 bool AALGameState::IsBattleRoyale() const { return Playlist == EALPlaylist::BattleRoyale; }

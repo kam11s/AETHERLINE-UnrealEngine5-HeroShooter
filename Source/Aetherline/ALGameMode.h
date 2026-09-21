@@ -20,6 +20,10 @@ public:
 	UPROPERTY(EditAnywhere) int32 BotFill = 7;
 	UPROPERTY(EditAnywhere) int32 BRPlayers = 21;
 	UPROPERTY(EditAnywhere) int32 BRSquadSize = 3;
+	UPROPERTY(EditAnywhere) float RematchDelaySeconds = 6.f;
 protected:
 	void SpawnArenaIfMissing();
+	void CheckMatchEnd();
+	void RestartSkirmish();
+	float RematchTimer = 0.f;
 };

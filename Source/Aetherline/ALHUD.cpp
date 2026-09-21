@@ -35,6 +35,12 @@ void AALHUD::DrawHUD()
 
 	if (const AALGameState* GS = GetWorld() ? GetWorld()->GetGameState<AALGameState>() : nullptr)
 	{
+		if (GS->bMatchOver)
+		{
+			DrawText(TEXT("MATCH OVER"), Amber, Cx - 70.f, Cy - 48.f);
+			DrawText(GS->WinnerSide == 1 ? TEXT("ALLIES WIN") : TEXT("HOSTILES WIN"), Teal, Cx - 72.f, Cy - 20.f);
+			DrawText(TEXT("NEXT ROUND"), Amber, Cx - 62.f, Cy + 16.f);
+		}
 		if (GS->IsBattleRoyale())
 		{
 			DrawText(FString::Printf(TEXT("ALIVE %d   CIRCLE %.0f"), GS->AlivePlayers, GS->CircleRadius), Amber, Cx - 120.f, 24.f);
