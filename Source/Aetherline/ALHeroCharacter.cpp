@@ -126,6 +126,9 @@ AALHeroCharacter::AALHeroCharacter()
 	bUseControllerRotationRoll = false;
 	GetCapsuleComponent()->SetCapsuleHalfHeight(StandingHalfHeight);
 	GetCapsuleComponent()->SetCapsuleRadius(34.f);
+	// The engine's Pawn profile ignores Visibility, which is the channel FireShot traces on, so shots (and the aim
+	// assist's line-of-sight test) would pass straight through heroes. The capsule is the hitbox; make it block.
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	GetCharacterMovement()->MaxWalkSpeed = StandingSpeed;
 	GetCharacterMovement()->JumpZVelocity = 520.f;
 	GetCharacterMovement()->AirControl = 0.35f;
@@ -157,9 +160,12 @@ AALHeroCharacter::AALHeroCharacter()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UMaterial> BasicMaterialFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	UStaticMesh* Cube = CubeFinder.Object;
-	UStaticMesh* Cylinder = CylinderFinder.Object ? CylinderFinder.Object : Cube;
-	GunBaseMaterial = BasicMaterialFinder.Object;
+	// .Object is a TObjectPtr in 5.8: resolve each finder to a raw pointer first so the fallback ternary below
+	// compares like with like instead of mixing TObjectPtr and UStaticMesh*.
+	UStaticMesh* Cube = CubeFinder.Object.Get();
+	UStaticMesh* CylinderMesh = CylinderFinder.Object.Get();
+	UStaticMesh* Cylinder = CylinderMesh ? CylinderMesh : Cube;
+	GunBaseMaterial = BasicMaterialFinder.Object.Get();
 
 	GunMesh = MakeGunPart(TEXT("GunMesh"), Cube, ReceiverCenter, ReceiverSize, FRotator::ZeroRotator);
 	GunGrip = MakeGunPart(TEXT("GunGrip"), Cube, GripCenter, GripSize, GripTilt);
@@ -175,7 +181,8 @@ AALHeroCharacter::AALHeroCharacter()
 	RefreshTeamVisuals();
 }
 
-UStaticMeshComponent* AALHeroCharacter::MakeGunPart(const TCHAR* Name, UStaticMesh* Mesh, const FVector& Center, const FVector& Size, const FRotator& Rotation)
+// InMesh, not Mesh: a parameter named Mesh shadows ACharacter::Mesh and the 5.8 toolchain treats that as an error.
+UStaticMeshComponent* AALHeroCharacter::MakeGunPart(const TCHAR* Name, UStaticMesh* InMesh, const FVector& Center, const FVector& Size, const FRotator& Rotation)
 {
 	UStaticMeshComponent* Part = CreateDefaultSubobject<UStaticMeshComponent>(Name);
 	Part->SetupAttachment(GunRoot);
@@ -185,7 +192,7 @@ UStaticMeshComponent* AALHeroCharacter::MakeGunPart(const TCHAR* Name, UStaticMe
 	Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Part->SetGenerateOverlapEvents(false);
 	Part->SetCastShadow(false);
-	if (Mesh) Part->SetStaticMesh(Mesh);
+	if (InMesh) Part->SetStaticMesh(InMesh);
 	return Part;
 }
 void AALHeroCharacter::BeginPlay()

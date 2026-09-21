@@ -134,7 +134,7 @@ protected:
 	void UpdateViewKick(float DeltaSeconds);
 	void UpdateViewmodel(float DeltaSeconds);
 	// Constructor-only: creates one gun part under GunRoot. Size is in cm (BasicShapes are 100cm).
-	UStaticMeshComponent* MakeGunPart(const TCHAR* Name, UStaticMesh* Mesh, const FVector& Center, const FVector& Size, const FRotator& Rotation);
+	UStaticMeshComponent* MakeGunPart(const TCHAR* Name, UStaticMesh* InMesh, const FVector& Center, const FVector& Size, const FRotator& Rotation);
 	void MoveForward(float V);
 	void MoveRight(float V);
 	void LookYaw(float V);
