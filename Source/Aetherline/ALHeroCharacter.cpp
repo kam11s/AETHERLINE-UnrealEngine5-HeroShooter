@@ -1,5 +1,7 @@
 #include "ALHeroCharacter.h"
 #include "ALHeroCatalog.h"
+#include "ALGameMode.h"
+#include "ALGameState.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -56,6 +58,42 @@ void AALHeroCharacter::Tick(float DeltaSeconds)
 	FireCooldown = FMath::Max(0.f, FireCooldown - DeltaSeconds);
 	UltCharge = FMath::Min(100.f, UltCharge + DeltaSeconds * 2.f);
 	if (bSkydiving && GetCharacterMovement() && GetCharacterMovement()->IsMovingOnGround()) bSkydiving = false;
+	if (HasAuthority() && !IsAlive() && RespawnTimer > 0.f)
+	{
+		RespawnTimer -= DeltaSeconds;
+		if (RespawnTimer <= 0.f) Respawn();
+	}
+}
+void AALHeroCharacter::HandleDeath()
+{
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+		Move->DisableMovement();
+	}
+	if (AController* C = GetController()) C->StopMovement();
+	// Battle Royale is elimination: no respawn there.
+	const AALGameState* GS = GetWorld() ? GetWorld()->GetGameState<AALGameState>() : nullptr;
+	RespawnTimer = (GS && GS->IsBattleRoyale()) ? 0.f : FMath::Max(RespawnDelay, 0.01f);
+}
+void AALHeroCharacter::Respawn()
+{
+	if (!HasAuthority() || !GetWorld()) return;
+	RespawnTimer = 0.f;
+	Health = MaxHealth;
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+		Move->SetMovementMode(MOVE_Walking);
+	}
+	FVector Loc(FMath::FRandRange(-1800.f, 1800.f), FMath::FRandRange(-1800.f, 1800.f), 120.f);
+	if (const AALGameMode* GM = GetWorld()->GetAuthGameMode<AALGameMode>()) Loc = GM->FindSpawnLocation(TeamId);
+	const FRotator Rot(0.f, FMath::FRandRange(-180.f, 180.f), 0.f);
+	// TeleportTo nudges out of geometry; if no free spot is found, place directly rather than staying dead in place.
+	if (!TeleportTo(Loc, Rot)) SetActorLocationAndRotation(Loc, Rot, false, nullptr, ETeleportType::TeleportPhysics);
+	if (AController* C = GetController()) C->SetControlRotation(FRotator(0.f, Rot.Yaw, 0.f));
 }
 void AALHeroCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -113,4 +151,8 @@ void AALHeroCharacter::ServerApplyDamageTo_Implementation(AALHeroCharacter* Targ
 	if (!HasAuthority() || !Target || !Target->IsAlive()) return;
 	if (Target->TeamId == TeamId) return;
 	Target->Health = FMath::Max(0.f, Target->Health - Amount);
+	if (Target->IsAlive()) return;
+	// Health just crossed to zero: this is the single kill event, so score it here exactly once.
+	Target->HandleDeath();
+	if (AALGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AALGameMode>() : nullptr) GM->OnHeroKilled(this, Target);
 }
