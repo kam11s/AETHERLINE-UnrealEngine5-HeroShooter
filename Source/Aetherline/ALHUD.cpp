@@ -37,9 +37,18 @@ void AALHUD::DrawHUD()
 	{
 		if (GS->bMatchOver)
 		{
-			DrawText(TEXT("MATCH OVER"), Amber, Cx - 70.f, Cy - 48.f);
-			DrawText(GS->WinnerSide == 1 ? TEXT("ALLIES WIN") : TEXT("HOSTILES WIN"), Teal, Cx - 72.f, Cy - 20.f);
-			DrawText(TEXT("NEXT ROUND"), Amber, Cx - 62.f, Cy + 16.f);
+			DrawRect(Dim, Cx - 190.f, Cy - 80.f, 380.f, 150.f);
+			DrawText(TEXT("MATCH OVER"), Amber, Cx - 70.f, Cy - 64.f);
+			const TCHAR* Winner = TEXT("DRAW");
+			if (GS->WinnerSide == 1) Winner = TEXT("ALLIES WIN");
+			else if (GS->WinnerSide == 2) Winner = TEXT("HOSTILES WIN");
+			DrawText(Winner, Teal, Cx - 72.f, Cy - 36.f);
+			DrawText(FString::Printf(TEXT("ALLIES %d   HOSTILES %d"), GS->AllyScore, GS->EnemyScore), Teal, Cx - 110.f, Cy - 8.f);
+			DrawText(TEXT("PRESS ENTER / START TO PLAY AGAIN"), Amber, Cx - 160.f, Cy + 28.f);
+		}
+		else if (const AALHeroCharacter* Hero = Cast<AALHeroCharacter>(GetOwningPawn()))
+		{
+			if (!Hero->IsAlive() && !GS->IsBattleRoyale()) DrawText(TEXT("DOWN  -  RESPAWNING"), Amber, Cx - 92.f, Cy + 40.f);
 		}
 		if (GS->IsBattleRoyale())
 		{

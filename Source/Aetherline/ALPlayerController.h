@@ -10,7 +10,11 @@ class AETHERLINE_API AALPlayerController : public APlayerController
 public:
 	AALPlayerController();
 	virtual void BeginPlay() override;
+	virtual void SetupInputComponent() override;
 	UFUNCTION() void OnLoadFinished();
 	UFUNCTION(BlueprintCallable) void SelectHero(EALHero Hero);
 	UFUNCTION(Server, Reliable) void ServerSelectHero(EALHero Hero);
+	UFUNCTION(Server, Reliable) void ServerRequestPlayAgain();
+protected:
+	void OnPlayAgain();
 };

@@ -24,6 +24,9 @@ public:
 	UFUNCTION(BlueprintPure) float GetMaxHealth() const { return MaxHealth; }
 	UFUNCTION(BlueprintPure) bool IsAlive() const { return Health > 0.f; }
 	UFUNCTION(Server, Reliable) void ServerApplyDamageTo(AALHeroCharacter* Target, float Amount);
+	// Server-only. Restores health and teleports to a team spawn point.
+	UFUNCTION(BlueprintCallable) void Respawn();
+	UPROPERTY(EditAnywhere) float RespawnDelay = 2.f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UCameraComponent> FPCamera;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunMesh;
@@ -49,8 +52,11 @@ protected:
 	void HeroPrev();
 	void HeroNext();
 
+	void HandleDeath();
+
 	UPROPERTY(Replicated) float Health = 200.f;
 	UPROPERTY() float MaxHealth = 200.f;
+	float RespawnTimer = 0.f;
 	float FireCooldown = 0.f;
 	float GamepadLookYawRate = 120.f;
 	float GamepadLookPitchRate = 80.f;

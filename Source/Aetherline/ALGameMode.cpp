@@ -99,20 +99,48 @@ void AALGameMode::SpawnBots()
 		if (AALHeroAIController* AIC = W->SpawnActor<AALHeroAIController>(AALHeroAIController::StaticClass(), Loc, FRotator::ZeroRotator)) AIC->Possess(Bot);
 	}
 }
+bool AALGameMode::IsScoredPlaylist(EALPlaylist InPlaylist) const
+{
+	return InPlaylist == EALPlaylist::BotSkirmish || InPlaylist == EALPlaylist::QuickPlay || InPlaylist == EALPlaylist::Ranked;
+}
+FVector AALGameMode::FindSpawnLocation(EALTeam Team) const
+{
+	// Allies spawn on the -X half of the yard, hostiles on +X, so respawns don't land in the enemy's lap.
+	const float XMin = (Team == EALTeam::Enemy) ? 600.f : -1800.f;
+	const float XMax = (Team == EALTeam::Enemy) ? 1800.f : -600.f;
+	return FVector(FMath::FRandRange(XMin, XMax), FMath::FRandRange(-1800.f, 1800.f), 120.f);
+}
+void AALGameMode::OnHeroKilled(AALHeroCharacter* Killer, AALHeroCharacter* Victim)
+{
+	AALGameState* GS = GetGameState<AALGameState>();
+	if (!GS || !Killer || !Victim || GS->bMatchOver || !IsScoredPlaylist(GS->Playlist)) return;
+	if (Killer->TeamId == Victim->TeamId) return;
+	if (Killer->TeamId == EALTeam::Ally) ++GS->AllyScore;
+	else if (Killer->TeamId == EALTeam::Enemy) ++GS->EnemyScore;
+	CheckMatchEnd();
+}
 void AALGameMode::CheckMatchEnd()
 {
 	AALGameState* GS = GetGameState<AALGameState>();
-	if (!GS || GS->Playlist == EALPlaylist::Training || GS->IsBattleRoyale()) return;
+	if (!GS || !IsScoredPlaylist(GS->Playlist)) return;
 	if (GS->bMatchOver)
 	{
-		RematchTimer -= GetWorld()->GetDeltaSeconds();
-		if (RematchTimer <= 0.f) RestartSkirmish();
+		if (RematchDelaySeconds > 0.f)
+		{
+			RematchTimer -= GetWorld()->GetDeltaSeconds();
+			if (RematchTimer <= 0.f) RestartSkirmish();
+		}
 		return;
 	}
 	int32 Winner = 0;
 	if (GS->AllyScore >= ScoreToWin) Winner = 1;
 	else if (GS->EnemyScore >= ScoreToWin) Winner = 2;
-	else if (GS->TimeLeft <= 0.f) Winner = (GS->AllyScore >= GS->EnemyScore) ? 1 : 2;
+	else if (GS->TimeLeft <= 0.f)
+	{
+		if (GS->AllyScore > GS->EnemyScore) Winner = 1;
+		else if (GS->EnemyScore > GS->AllyScore) Winner = 2;
+		else Winner = 3;
+	}
 	if (Winner != 0)
 	{
 		GS->bMatchOver = true;
@@ -121,14 +149,27 @@ void AALGameMode::CheckMatchEnd()
 		RematchTimer = RematchDelaySeconds;
 	}
 }
+void AALGameMode::RequestPlayAgain()
+{
+	const AALGameState* GS = GetGameState<AALGameState>();
+	if (!GS || !GS->bMatchOver || !IsScoredPlaylist(GS->Playlist)) return;
+	RestartSkirmish();
+}
 void AALGameMode::RestartSkirmish()
 {
 	UWorld* W = GetWorld();
 	if (!W) return;
+	EALPlaylist Playlist = EALPlaylist::BotSkirmish;
+	if (const AALGameState* GS = GetGameState<AALGameState>())
+	{
+		if (IsScoredPlaylist(GS->Playlist)) Playlist = GS->Playlist;
+	}
 	TArray<AALHeroCharacter*> ToRemove;
+	TArray<AALHeroCharacter*> Players;
 	for (TActorIterator<AALHeroCharacter> It(W); It; ++It)
 	{
-		if (!It->IsPlayerControlled()) ToRemove.Add(*It);
+		if (It->IsPlayerControlled()) Players.Add(*It);
+		else ToRemove.Add(*It);
 	}
 	for (AALHeroCharacter* Bot : ToRemove)
 	{
@@ -139,6 +180,7 @@ void AALGameMode::RestartSkirmish()
 		}
 		Bot->Destroy();
 	}
-	StartPlaylist(EALPlaylist::BotSkirmish);
+	StartPlaylist(Playlist);
+	for (AALHeroCharacter* Player : Players) Player->Respawn();
 }
 AActor* AALGameMode::ChoosePlayerStart_Implementation(AController* Player) { return Super::ChoosePlayerStart_Implementation(Player); }
