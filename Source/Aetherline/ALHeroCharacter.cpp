@@ -14,9 +14,19 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
+#include "HAL/IConsoleManager.h"
+#include "InputCoreTypes.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
+
+static TAutoConsoleVariable<int32> CVarALAimAssistDebug(
+	TEXT("al.AimAssistDebug"), 0,
+	TEXT("1 = draw the aim assist target point (teal) and the pull line from the crosshair (amber)."));
+static TAutoConsoleVariable<int32> CVarALAimAssistForcePad(
+	TEXT("al.AimAssistForcePad"), 0,
+	TEXT("1 = use the gamepad assist strength and friction whatever the input device (test the pad feel on a mouse)."));
 
 namespace
 {
@@ -251,8 +261,11 @@ void AALHeroCharacter::Tick(float DeltaSeconds)
 	if (bSkydiving && GetCharacterMovement() && GetCharacterMovement()->IsMovingOnGround()) bSkydiving = false;
 	if (bFireHeld && IsLocallyControlled()) FireOnce();
 	UpdateCrouch(DeltaSeconds);
-	UpdateViewKick(DeltaSeconds);
+	// Recoil first, assist second: the assist's pull-down then reads as compensation on the next recoil update.
+	UpdateAimRecoil(DeltaSeconds);
+	UpdateAimAssist(DeltaSeconds);
 	UpdateViewmodel(DeltaSeconds);
+	LookInputThisFrame = 0.f;
 }
 void AALHeroCharacter::AddFireKick(float Heft)
 {
@@ -265,37 +278,255 @@ void AALHeroCharacter::AddFireKick(float Heft)
 	// Re-roll the sideways direction but keep some of the last one so it drifts rather than jitters.
 	KickSide = FMath::Lerp(KickSide, FMath::FRandRange(-1.f, 1.f), 0.6f);
 
-	// Camera: queue the climb; UpdateViewKick eases the control rotation toward it and back. Bots keep the
-	// viewmodel kick (others can see their gun) but never have their aim pushed around.
+	// Aim: queue the climb; UpdateAimRecoil eases the control rotation onto it. Bots keep the viewmodel kick
+	// (others can see their gun) but never have their aim pushed around.
 	if (!Cast<APlayerController>(GetController())) return;
-	const float Kick = FMath::Lerp(ViewKickLightDeg, ViewKickHeavyDeg, Heft);
-	ViewKickPitchTarget = FMath::Min(ViewKickPitchTarget + Kick, FMath::Max(ViewKickClimbMaxDeg, Kick));
-	ViewKickYawTarget += FMath::FRandRange(-1.f, 1.f) * Kick * ViewKickYawFraction;
+	if (UWorld* W = GetWorld()) LastShotTime = static_cast<float>(W->GetTimeSeconds());
+	// FireShot clamps heft to 0.3..1 (carbine class .. Bastion); remap so the carbine gets exactly the light value.
+	const float HeftAlpha = FMath::Clamp((Heft - 0.3f) / 0.7f, 0.f, 1.f);
+	float Kick = FMath::Lerp(RecoilPitchLightDeg, RecoilPitchHeavyDeg, HeftAlpha);
+	Kick *= 1.f + FMath::FRandRange(-1.f, 1.f) * FMath::Clamp(RecoilPitchNoise, 0.f, 0.9f);
+	// Progressive climb that plateaus: full kicks while the burst is young, then each shot adds less as the
+	// accumulated climb closes on RecoilClimbMaxDeg, so a spray levels off at the cap instead of hard-stopping.
+	const float ClimbMax = FMath::Max(RecoilClimbMaxDeg, Kick);
+	const float SoftStart = FMath::Clamp(RecoilClimbSoftStart, 0.f, 0.99f) * ClimbMax;
+	const float Remaining = FMath::Max(ClimbMax - RecoilPitchTarget, 0.f);
+	if (RecoilPitchTarget > SoftStart)
+	{
+		Kick *= FMath::Clamp(Remaining / FMath::Max(ClimbMax - SoftStart, UE_KINDA_SMALL_NUMBER), 0.f, 1.f);
+	}
+	RecoilPitchTarget += FMath::Min(Kick, Remaining);
+	RecoilYawTarget += FMath::FRandRange(-1.f, 1.f) * RecoilYawNoiseDeg * FMath::Lerp(1.f, 1.6f, HeftAlpha);
 }
-void AALHeroCharacter::UpdateViewKick(float DeltaSeconds)
+void AALHeroCharacter::UpdateAimRecoil(float DeltaSeconds)
 {
 	if (DeltaSeconds <= 0.f || !IsLocallyControlled()) return;
 	APlayerController* PC = Cast<APlayerController>(GetController());
-	if (!PC)
+	UWorld* W = GetWorld();
+	if (!PC || !W)
 	{
-		ViewKickPitch = ViewKickYaw = ViewKickPitchTarget = ViewKickYawTarget = 0.f;
+		RecoilPitchTarget = RecoilYawTarget = RecoilPitchApplied = RecoilYawApplied = 0.f;
+		bRecoilMarkValid = false;
 		return;
 	}
-	const float PrevPitch = ViewKickPitch;
-	const float PrevYaw = ViewKickYaw;
-	ViewKickPitch = FMath::FInterpTo(ViewKickPitch, ViewKickPitchTarget, DeltaSeconds, ViewKickSnapSpeed);
-	ViewKickYaw = FMath::FInterpTo(ViewKickYaw, ViewKickYawTarget, DeltaSeconds, ViewKickSnapSpeed);
-	ViewKickPitchTarget = FMath::FInterpTo(ViewKickPitchTarget, 0.f, DeltaSeconds, ViewKickRecoverSpeed);
-	ViewKickYawTarget = FMath::FInterpTo(ViewKickYawTarget, 0.f, DeltaSeconds, ViewKickRecoverSpeed);
-	const float DeltaPitch = ViewKickPitch - PrevPitch;
-	const float DeltaYaw = ViewKickYaw - PrevYaw;
-	if (FMath::IsNearlyZero(DeltaPitch, 1e-4f) && FMath::IsNearlyZero(DeltaYaw, 1e-4f)) return;
-	// Only the frame-to-frame change is applied, so the player's own look input passes straight through and the
-	// pitch limits in the camera manager still apply on the next controller update.
 	FRotator Ctrl = PC->GetControlRotation();
-	Ctrl.Pitch += DeltaPitch;
-	Ctrl.Yaw += DeltaYaw;
-	PC->SetControlRotation(Ctrl);
+	const float CtrlPitch = static_cast<float>(Ctrl.Pitch);
+	const float CtrlYaw = static_cast<float>(Ctrl.Yaw);
+
+	// Compensation: whatever moved the view since our last write (player look, aim assist, the camera's pitch
+	// clamp) that opposes the recoil is credited against it. The climb the player has already fought off must not
+	// be recovered again on release, or the crosshair would dive under the target they were holding.
+	if (bRecoilMarkValid)
+	{
+		const float ExtPitch = FMath::FindDeltaAngleDegrees(RecoilPitchMark, CtrlPitch);
+		if (ExtPitch < 0.f && RecoilPitchTarget > 0.f)
+		{
+			const float Credit = FMath::Min(-ExtPitch, RecoilPitchTarget);
+			RecoilPitchTarget -= Credit;
+			RecoilPitchApplied -= Credit;
+		}
+		const float ExtYaw = FMath::FindDeltaAngleDegrees(RecoilYawMark, CtrlYaw);
+		if (!FMath::IsNearlyZero(RecoilYawTarget) && ExtYaw * RecoilYawTarget < 0.f)
+		{
+			const float Credit = FMath::Min(FMath::Abs(ExtYaw), FMath::Abs(RecoilYawTarget)) * FMath::Sign(RecoilYawTarget);
+			RecoilYawTarget -= Credit;
+			RecoilYawApplied -= Credit;
+		}
+	}
+
+	// Recovery: once the burst has paused, drift the earned climb back toward rest. Proportional so the tail
+	// eases out, floored so a small residual does not crawl.
+	const float SinceShot = static_cast<float>(W->GetTimeSeconds()) - LastShotTime;
+	const float Total = FMath::Abs(RecoilPitchTarget) + FMath::Abs(RecoilYawTarget);
+	if (SinceShot >= RecoilRecoverDelay && Total > UE_KINDA_SMALL_NUMBER)
+	{
+		const float Step = FMath::Min(Total, FMath::Max(Total * RecoilRecoverSpeed, RecoilRecoverMinDegPerSec) * DeltaSeconds);
+		const float Keep = 1.f - Step / Total;
+		RecoilPitchTarget *= Keep;
+		RecoilYawTarget *= Keep;
+	}
+
+	// Ease the applied offset onto the target and write only the frame-to-frame change into the control rotation,
+	// so the player's own look input passes straight through and the camera manager's pitch limits still apply.
+	const float PrevPitch = RecoilPitchApplied;
+	const float PrevYaw = RecoilYawApplied;
+	RecoilPitchApplied = FMath::FInterpTo(RecoilPitchApplied, RecoilPitchTarget, DeltaSeconds, RecoilSnapSpeed);
+	RecoilYawApplied = FMath::FInterpTo(RecoilYawApplied, RecoilYawTarget, DeltaSeconds, RecoilSnapSpeed);
+	const float DeltaPitch = RecoilPitchApplied - PrevPitch;
+	const float DeltaYaw = RecoilYawApplied - PrevYaw;
+	if (!FMath::IsNearlyZero(DeltaPitch, 1e-4f) || !FMath::IsNearlyZero(DeltaYaw, 1e-4f))
+	{
+		Ctrl.Pitch += DeltaPitch;
+		Ctrl.Yaw += DeltaYaw;
+		PC->SetControlRotation(Ctrl);
+	}
+	RecoilPitchMark = static_cast<float>(Ctrl.Pitch);
+	RecoilYawMark = static_cast<float>(Ctrl.Yaw);
+	bRecoilMarkValid = true;
+}
+void AALHeroCharacter::NoteInputDevice(bool bGamepad)
+{
+	bUsingGamepad = bGamepad;
+}
+AALHeroCharacter* AALHeroCharacter::FindAssistTarget(const FVector& Eye, const FVector& Fwd, FVector& OutAimDir, float& OutEdgeDeg, float& OutBodyDeg, float& OutDist) const
+{
+	UWorld* W = GetWorld();
+	if (!W) return nullptr;
+	const float Cone = FMath::Max(AssistConeDeg, 0.f);
+	const float MaxRange = FMath::Max(AssistMaxRangeCm, 1.f);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(ALAimAssist), false, this);
+
+	AALHeroCharacter* Best = nullptr;
+	float BestScore = TNumericLimits<float>::Max();
+	for (TActorIterator<AALHeroCharacter> It(W); It; ++It)
+	{
+		AALHeroCharacter* H = *It;
+		if (H == this || !H->IsAlive() || H->TeamId == TeamId || H->bOnDropship) continue;
+		const UCapsuleComponent* Cap = H->GetCapsuleComponent();
+		if (!Cap) continue;
+		const FVector Center = H->GetActorLocation();
+		const float Dist = static_cast<float>(FVector::Dist(Eye, Center));
+		if (Dist > MaxRange || Dist < 60.f) continue;
+		// Cheap pre-reject on the centre: no part of the capsule can be inside the cone if the centre is further
+		// off than the cone plus the capsule's own angular half-height at this range.
+		const float HalfHeight = Cap->GetScaledCapsuleHalfHeight();
+		const float PreDeg = FMath::Min(Cone + FMath::RadiansToDegrees(FMath::Atan(HalfHeight / Dist)), 89.f);
+		if (FVector::DotProduct(Fwd, (Center - Eye).GetSafeNormal()) < FMath::Cos(FMath::DegreesToRadians(PreDeg))) continue;
+
+		// Pull toward the nearest point of the capsule's core segment to the aim ray, not the centre, so a head
+		// or a knee poking past cover is as good a magnet as centre mass.
+		const float Radius = Cap->GetScaledCapsuleRadius();
+		const float Core = FMath::Max(HalfHeight - Radius, 0.f);
+		FVector OnRay, OnCore;
+		FMath::SegmentDistToSegmentSafe(Eye, Eye + Fwd * MaxRange, Center - FVector(0.f, 0.f, Core), Center + FVector(0.f, 0.f, Core), OnRay, OnCore);
+		const FVector ToCore = OnCore - Eye;
+		const float CoreDist = static_cast<float>(ToCore.Size());
+		if (CoreDist < UE_KINDA_SMALL_NUMBER) continue;
+		const FVector AimDir = ToCore / CoreDist;
+		const float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(static_cast<float>(FVector::DotProduct(Fwd, AimDir)), -1.f, 1.f)));
+		const float BodyDeg = FMath::RadiansToDegrees(FMath::Atan(Radius / CoreDist));
+		// Angle from the crosshair to the visible edge of the body; inside the body it is zero.
+		const float EdgeDeg = FMath::Max(AngleDeg - BodyDeg, 0.f);
+		if (EdgeDeg > Cone) continue;
+
+		FHitResult Hit;
+		const bool bBlocked = W->LineTraceSingleByChannel(Hit, Eye, OnCore, ECC_Visibility, Params) && Hit.GetActor() != H;
+		if (bBlocked) continue;
+
+		// Nearest to the crosshair wins, with a mild bias toward closer enemies and toward the one we already have
+		// so two overlapping bots do not make the pull flip-flop.
+		float Score = EdgeDeg + Dist * 0.0004f;
+		if (H == AssistTarget.Get()) Score -= 1.5f;
+		if (Score < BestScore)
+		{
+			BestScore = Score;
+			Best = H;
+			OutAimDir = AimDir;
+			OutEdgeDeg = EdgeDeg;
+			OutBodyDeg = BodyDeg;
+			OutDist = CoreDist;
+		}
+	}
+	return Best;
+}
+void AALHeroCharacter::UpdateAimAssist(float DeltaSeconds)
+{
+	UWorld* W = GetWorld();
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!W || !PC || DeltaSeconds <= 0.f || !IsLocallyControlled() || !IsAlive() || bOnDropship)
+	{
+		AssistTarget.Reset();
+		AssistWeight = 0.f;
+		return;
+	}
+	const bool bPad = bUsingGamepad || CVarALAimAssistForcePad.GetValueOnGameThread() != 0;
+	const float Strength = FMath::Max(bPad ? AssistStrengthPad : AssistStrengthMnK, 0.f);
+	if (Strength <= 0.f || AssistConeDeg <= 0.f)
+	{
+		AssistTarget.Reset();
+		AssistWeight = 0.f;
+		return;
+	}
+
+	const FVector Eye = GetEyeLocation();
+	FRotator Ctrl = PC->GetControlRotation();
+	const FVector Fwd = Ctrl.Vector();
+	FVector AimDir = Fwd;
+	float EdgeDeg = 0.f, BodyDeg = 0.f, Dist = 0.f;
+	AALHeroCharacter* Target = FindAssistTarget(Eye, Fwd, AimDir, EdgeDeg, BodyDeg, Dist);
+	if (!Target)
+	{
+		AssistTarget.Reset();
+		AssistWeight = FMath::FInterpTo(AssistWeight, 0.f, DeltaSeconds, 12.f);
+		return;
+	}
+	const bool bNewTarget = Target != AssistTarget.Get();
+	AssistTarget = Target;
+
+	// Falloff: full inside the cone's centre, easing to nothing at its edge; full out to AssistFullRangeCm, easing to
+	// nothing at AssistMaxRangeCm. The assist never has a hard boundary the player can feel.
+	const float AngleWeight = FMath::SmoothStep(0.f, 1.f, 1.f - EdgeDeg / FMath::Max(AssistConeDeg, UE_KINDA_SMALL_NUMBER));
+	const float RangeSpan = FMath::Max(AssistMaxRangeCm - AssistFullRangeCm, 1.f);
+	const float DistWeight = 1.f - FMath::Clamp((Dist - AssistFullRangeCm) / RangeSpan, 0.f, 1.f);
+	const float Weight = AngleWeight * DistWeight * Strength;
+	AssistWeight = FMath::Clamp(Weight, 0.f, 1.f);
+
+	// Soft, not a lock: the pull needs someone to be doing something. A still player looking at a still bot only
+	// gets AssistIdleScale of it, so the reticle is never dragged onto a target on its own.
+	const bool bLooking = LookInputThisFrame > 0.f;
+	const bool bMoving = GetVelocity().SizeSquared2D() > 30.f * 30.f;
+	const bool bTargetMoving = Target->GetVelocity().SizeSquared() > 30.f * 30.f;
+	const bool bFiring = bFireHeld || FireCooldown > 0.f;
+	const float Activity = (bLooking || bMoving || bTargetMoving || bFiring) ? 1.f : FMath::Clamp(AssistIdleScale, 0.f, 1.f);
+
+	// Magnetism: close a share of the angle to the nearest body point, minus a dead zone over the body itself.
+	const FRotator ToRot = AimDir.Rotation();
+	const float DPitch = FMath::FindDeltaAngleDegrees(static_cast<float>(Ctrl.Pitch), static_cast<float>(ToRot.Pitch));
+	const float DYaw = FMath::FindDeltaAngleDegrees(static_cast<float>(Ctrl.Yaw), static_cast<float>(ToRot.Yaw));
+	const float Mag = FMath::Sqrt(DPitch * DPitch + DYaw * DYaw);
+	const float Dead = BodyDeg * FMath::Clamp(AssistBodyDeadFraction, 0.f, 1.f);
+	float PullPitch = 0.f, PullYaw = 0.f;
+	if (Mag > Dead + UE_KINDA_SMALL_NUMBER)
+	{
+		const float Alpha = FMath::Min(AssistPullPerSec * Weight * Activity * DeltaSeconds, 1.f) * (Mag - Dead) / Mag;
+		PullPitch = DPitch * Alpha;
+		PullYaw = DYaw * Alpha;
+	}
+
+	// Tracking: ride along with the target's apparent motion (their strafe, or ours past them) so a moving enemy
+	// stays under the reticle without the stick having to lead it. Measured on the capsule centre, which does not
+	// slide when we pitch, unlike the nearest-core point above.
+	const FVector CenterDir = (Target->GetActorLocation() - Eye).GetSafeNormal();
+	if (!bNewTarget && !CenterDir.IsNearlyZero() && !AssistPrevCenterDir.IsNearlyZero())
+	{
+		const FRotator PrevRot = AssistPrevCenterDir.Rotation();
+		const FRotator CurRot = CenterDir.Rotation();
+		const float Track = FMath::Max(AssistTrackStrength, 0.f) * Weight;
+		PullPitch += FMath::FindDeltaAngleDegrees(static_cast<float>(PrevRot.Pitch), static_cast<float>(CurRot.Pitch)) * Track;
+		PullYaw += FMath::FindDeltaAngleDegrees(static_cast<float>(PrevRot.Yaw), static_cast<float>(CurRot.Yaw)) * Track;
+	}
+	AssistPrevCenterDir = CenterDir;
+
+	// Rate cap so nothing ever reads as a snap, however close the target or fast the frame.
+	const float PullMag = FMath::Sqrt(PullPitch * PullPitch + PullYaw * PullYaw);
+	const float MaxStep = FMath::Max(AssistMaxPullDegPerSec, 0.f) * DeltaSeconds;
+	if (PullMag > MaxStep && PullMag > UE_KINDA_SMALL_NUMBER)
+	{
+		PullPitch *= MaxStep / PullMag;
+		PullYaw *= MaxStep / PullMag;
+	}
+	if (!FMath::IsNearlyZero(PullPitch, 1e-5f) || !FMath::IsNearlyZero(PullYaw, 1e-5f))
+	{
+		Ctrl.Pitch += PullPitch;
+		Ctrl.Yaw += PullYaw;
+		PC->SetControlRotation(Ctrl);
+	}
+	if (CVarALAimAssistDebug.GetValueOnGameThread() != 0)
+	{
+		const FVector Point = Eye + AimDir * Dist;
+		DrawDebugSphere(W, Point, 14.f, 8, FColor(40, 220, 255), false, -1.f, 0, 1.f);
+		DrawDebugLine(W, Eye + Fwd * 100.f, Point, FColor(255, 170, 50), false, -1.f, 0, 0.6f);
+	}
 }
 void AALHeroCharacter::Landed(const FHitResult& Hit)
 {
@@ -374,15 +605,53 @@ void AALHeroCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 void AALHeroCharacter::OnJump() { if (bOnDropship || bSkydiving) DeployFromDropship(); else { bWantsCrouch = false; Jump(); } }
 void AALHeroCharacter::AttachToDropship(AActor* Ship) { if (!Ship) return; bOnDropship = true; AttachToActor(Ship, FAttachmentTransformRules::SnapToTargetNotIncludingScale); }
 void AALHeroCharacter::DeployFromDropship() { bOnDropship = false; bSkydiving = true; DetachFromActor(FDetachmentTransformRules::KeepWorldTransform); LaunchCharacter(FVector(0.f,0.f,-800.f)+GetActorForwardVector()*400.f,true,true); }
-void AALHeroCharacter::OnFire() { bFireHeld = true; FireOnce(); }
+void AALHeroCharacter::OnFire()
+{
+	// "Fire" is bound to both the mouse button and the pad trigger; ask which one is actually down.
+	if (const APlayerController* PC = Cast<APlayerController>(GetController())) NoteInputDevice(PC->IsInputKeyDown(EKeys::Gamepad_RightTrigger));
+	bFireHeld = true;
+	FireOnce();
+}
 void AALHeroCharacter::OnFireReleased() { bFireHeld = false; }
 void AALHeroCharacter::MoveForward(float V) { if (FMath::Abs(V) > StickDeadZone) AddMovementInput(GetActorForwardVector(), V); }
 void AALHeroCharacter::MoveRight(float V) { if (FMath::Abs(V) > StickDeadZone) AddMovementInput(GetActorRightVector(), V); }
-void AALHeroCharacter::LookYaw(float V) { if (!FMath::IsNearlyZero(V)) AddControllerYawInput(V); }
-void AALHeroCharacter::LookPitch(float V) { if (!FMath::IsNearlyZero(V)) AddControllerPitchInput(V); }
-void AALHeroCharacter::LookYawGamepad(float V) { if (FMath::Abs(V) > StickDeadZone && GetWorld()) AddControllerYawInput(V * GamepadLookYawRate * GetWorld()->GetDeltaSeconds()); }
-void AALHeroCharacter::LookPitchGamepad(float V) { if (FMath::Abs(V) > StickDeadZone && GetWorld()) AddControllerPitchInput(V * GamepadLookPitchRate * GetWorld()->GetDeltaSeconds()); }
-void AALHeroCharacter::FireAxis(float V) { if (V >= 0.45f) FireOnce(); }
+// Mouse look. Friction only applies if AssistFrictionMnK is raised above its default of zero.
+void AALHeroCharacter::LookYaw(float V)
+{
+	if (FMath::IsNearlyZero(V)) return;
+	NoteInputDevice(false);
+	LookInputThisFrame += FMath::Abs(V);
+	AddControllerYawInput(V * AssistLookScale());
+}
+void AALHeroCharacter::LookPitch(float V)
+{
+	if (FMath::IsNearlyZero(V)) return;
+	NoteInputDevice(false);
+	LookInputThisFrame += FMath::Abs(V);
+	AddControllerPitchInput(V * AssistLookScale());
+}
+// Stick look. Over an enemy the stick slows by AssistFrictionPad x assist weight (the "sticky" half of the assist).
+void AALHeroCharacter::LookYawGamepad(float V)
+{
+	if (FMath::Abs(V) <= StickDeadZone || !GetWorld()) return;
+	NoteInputDevice(true);
+	LookInputThisFrame += FMath::Abs(V);
+	AddControllerYawInput(V * GamepadLookYawRate * GetWorld()->GetDeltaSeconds() * AssistLookScale());
+}
+void AALHeroCharacter::LookPitchGamepad(float V)
+{
+	if (FMath::Abs(V) <= StickDeadZone || !GetWorld()) return;
+	NoteInputDevice(true);
+	LookInputThisFrame += FMath::Abs(V);
+	AddControllerPitchInput(V * GamepadLookPitchRate * GetWorld()->GetDeltaSeconds() * AssistLookScale());
+}
+float AALHeroCharacter::AssistLookScale() const
+{
+	const bool bPad = bUsingGamepad || CVarALAimAssistForcePad.GetValueOnGameThread() != 0;
+	const float Friction = FMath::Clamp(bPad ? AssistFrictionPad : AssistFrictionMnK, 0.f, 0.9f);
+	return 1.f - Friction * FMath::Clamp(AssistWeight, 0.f, 1.f);
+}
+void AALHeroCharacter::FireAxis(float V) { if (V >= 0.45f) { NoteInputDevice(true); FireOnce(); } }
 void AALHeroCharacter::HeroPrev() { ApplyHero(static_cast<EALHero>((static_cast<int32>(HeroId)+5)%6)); }
 void AALHeroCharacter::HeroNext() { ApplyHero(static_cast<EALHero>((static_cast<int32>(HeroId)+1)%6)); }
 void AALHeroCharacter::FireOnce()

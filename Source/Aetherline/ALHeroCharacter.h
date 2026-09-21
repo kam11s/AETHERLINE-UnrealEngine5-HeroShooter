@@ -88,16 +88,47 @@ public:
 	UPROPERTY(EditAnywhere, Category="Viewmodel") float KickSideFraction = 0.1f;
 	UPROPERTY(EditAnywhere, Category="Viewmodel") float LandDipCm = 6.f;
 
-	// Camera kick per shot, light hitters -> heavy hitters. It is a control-rotation offset that eases in at
-	// ViewKickSnapSpeed and eases back out at ViewKickRecoverSpeed, so the crosshair climbs a touch and comes home on
-	// its own (Halo-style) rather than leaving the aim point permanently higher. ViewKickClimbMaxDeg caps how far
-	// sustained full-auto can walk the view up.
-	UPROPERTY(EditAnywhere, Category="Recoil") float ViewKickLightDeg = 0.15f;
-	UPROPERTY(EditAnywhere, Category="Recoil") float ViewKickHeavyDeg = 0.35f;
-	UPROPERTY(EditAnywhere, Category="Recoil") float ViewKickYawFraction = 0.1f;
-	UPROPERTY(EditAnywhere, Category="Recoil") float ViewKickSnapSpeed = 30.f;
-	UPROPERTY(EditAnywhere, Category="Recoil") float ViewKickRecoverSpeed = 7.f;
-	UPROPERTY(EditAnywhere, Category="Recoil") float ViewKickClimbMaxDeg = 1.2f;
+	// Aim recoil. Every shot pushes the control rotation - the crosshair and the direction the next shot leaves on -
+	// up by RecoilPitchLightDeg (carbine class) .. RecoilPitchHeavyDeg (Bastion), +-RecoilPitchNoise of that, plus
+	// +-RecoilYawNoiseDeg of yaw, eased in over a few frames at RecoilSnapSpeed. Sustained fire climbs progressively:
+	// once the accumulated climb passes RecoilClimbSoftStart x RecoilClimbMaxDeg each shot's kick shrinks, so a spray
+	// flattens out at the cap instead of walking to the sky (and the player has to pull down against it).
+	// RecoilRecoverDelay after the last shot the view drifts back at RecoilRecoverSpeed (fraction of the remaining
+	// climb per second, never slower than RecoilRecoverMinDegPerSec). Pitch the player - or aim assist - pulls down
+	// mid-burst counts as compensation and is taken off the climb, so recovery never dips below the point they held.
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilPitchLightDeg = 0.8f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilPitchHeavyDeg = 2.6f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilPitchNoise = 0.2f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilYawNoiseDeg = 0.3f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilClimbMaxDeg = 6.f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilClimbSoftStart = 0.45f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilSnapSpeed = 40.f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilRecoverDelay = 0.12f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilRecoverSpeed = 9.f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilRecoverMinDegPerSec = 8.f;
+
+	// Aim assist (Rivals-style soft magnetism). Each frame the closest live enemy hitbox inside AssistConeDeg of the
+	// crosshair, with line of sight and within AssistMaxRangeCm, pulls the control rotation toward itself: the pull
+	// closes AssistPullPerSec of the remaining angle per second (capped at AssistMaxPullDegPerSec), fades to nothing
+	// at the cone edge and between AssistFullRangeCm and AssistMaxRangeCm, and stops once the crosshair is over the
+	// body (AssistBodyDeadFraction of the capsule's angular radius), so it settles on the target rather than
+	// centre-locking it. AssistTrackStrength is the share of the target's apparent motion (their strafe or ours)
+	// the view rides along with; AssistFriction* slow stick look while over a target. Everything is scaled by
+	// AssistStrengthPad on gamepad or AssistStrengthMnK on mouse + keyboard (last look / fire device wins), and
+	// drops to AssistIdleScale when nobody - player, look stick, target - is moving, so a still reticle is never
+	// dragged onto a still enemy.
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistStrengthPad = 1.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistStrengthMnK = 0.25f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistConeDeg = 8.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistFullRangeCm = 1800.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistMaxRangeCm = 4500.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistPullPerSec = 5.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistMaxPullDegPerSec = 45.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistBodyDeadFraction = 0.6f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistTrackStrength = 0.6f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistFrictionPad = 0.35f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistFrictionMnK = 0.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistIdleScale = 0.25f;
 
 	// Crouch is a blend, not a snap: capsule half-height, FP eye height and walk speed all interpolate between the
 	// Standing* / Crouched* values over CrouchDownTime / StandUpTime. Standing up is gated on a capsule overlap test
@@ -129,9 +160,18 @@ protected:
 	void ApplyCrouchPose(float Eased);
 	// True when the full standing capsule fits where it would end up. May settle the capsule onto the floor first.
 	bool TryClearStandUpSpace();
-	// Called for every shot the local player fires: shoves the viewmodel spring and queues the camera kick.
+	// Called for every shot the local player fires: shoves the viewmodel spring and queues the aim recoil.
 	void AddFireKick(float Heft);
-	void UpdateViewKick(float DeltaSeconds);
+	// Eases queued recoil into the control rotation, credits player / assist pull-down against it, recovers after a burst.
+	void UpdateAimRecoil(float DeltaSeconds);
+	// Soft magnetism toward the best enemy hitbox near the crosshair. Runs after recoil so its pull counts as compensation.
+	void UpdateAimAssist(float DeltaSeconds);
+	// Picks the enemy the assist should work on. Returns null when nothing qualifies; out params describe the pull.
+	AALHeroCharacter* FindAssistTarget(const FVector& Eye, const FVector& Fwd, FVector& OutAimDir, float& OutEdgeDeg, float& OutBodyDeg, float& OutDist) const;
+	// Remembers which device the player is aiming / firing with so the assist can pick its strength.
+	void NoteInputDevice(bool bGamepad);
+	// Look-input multiplier for assist friction: 1 with no target, down to 1 - AssistFriction* over one.
+	float AssistLookScale() const;
 	void UpdateViewmodel(float DeltaSeconds);
 	// Constructor-only: creates one gun part under GunRoot. Size is in cm (BasicShapes are 100cm).
 	UStaticMeshComponent* MakeGunPart(const TCHAR* Name, UStaticMesh* InMesh, const FVector& Center, const FVector& Size, const FRotator& Rotation);
@@ -162,11 +202,26 @@ protected:
 	float GunKick = 0.f;
 	float GunKickVel = 0.f;
 	float KickSide = 0.f;
-	// Camera kick: the offset currently applied to the control rotation and the value it is chasing (degrees).
-	float ViewKickPitch = 0.f;
-	float ViewKickYaw = 0.f;
-	float ViewKickPitchTarget = 0.f;
-	float ViewKickYawTarget = 0.f;
+	// Aim recoil, in degrees of control rotation. *Target is the climb the burst has earned (minus what has been
+	// compensated or recovered), *Applied is how much of it has actually been written into the control rotation.
+	// RecoilPitchMark / RecoilYawMark are the control rotation right after our write, so next frame's difference is
+	// whatever the player, the aim assist or the pitch clamp moved on top.
+	float RecoilPitchTarget = 0.f;
+	float RecoilYawTarget = 0.f;
+	float RecoilPitchApplied = 0.f;
+	float RecoilYawApplied = 0.f;
+	float RecoilPitchMark = 0.f;
+	float RecoilYawMark = 0.f;
+	bool bRecoilMarkValid = false;
+	float LastShotTime = -100.f;
+	// Aim assist state: current target (for hysteresis + tracking), the world direction to its centre last frame,
+	// and the 0..1 weight the friction reads.
+	TWeakObjectPtr<AALHeroCharacter> AssistTarget;
+	FVector AssistPrevCenterDir = FVector::ZeroVector;
+	float AssistWeight = 0.f;
+	// Look input seen this frame (stick or mouse) so the assist knows the player is actively aiming.
+	float LookInputThisFrame = 0.f;
+	bool bUsingGamepad = false;
 	float GunLandDip = 0.f;
 	float BobTime = 0.f;
 	float BobBlend = 0.f;
