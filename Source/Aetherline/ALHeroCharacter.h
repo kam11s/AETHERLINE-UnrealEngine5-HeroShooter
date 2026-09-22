@@ -25,6 +25,8 @@ public:
 
 	UFUNCTION(BlueprintCallable) void ApplyHero(EALHero Hero);
 	UFUNCTION(BlueprintCallable) void FireOnce();
+	bool FireShot(const FVector& Dir, float DamageScale);
+	FVector GetEyeLocation() const;
 	UFUNCTION(BlueprintPure) float GetHealth() const { return Health; }
 	UFUNCTION(BlueprintPure) float GetMaxHealth() const { return MaxHealth; }
 	UFUNCTION(BlueprintPure) bool IsAlive() const { return Health > 0.f; }
@@ -32,13 +34,9 @@ public:
 	void RefreshTeamVisuals();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UCameraComponent> FPCamera;
-
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> BodyMesh;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> HeadMesh;
-	// Viewmodel pivot under the camera. Bob / sway / kick move this, the gun parts hang off it.
-	// GunRoot space: X forward along the barrel, origin at the rear-bottom corner of the receiver.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<USceneComponent> GunRoot;
-	// Receiver body. Kept as "GunMesh" so existing references / Details-panel layouts still work.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunMesh;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunGrip;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunMagazine;
@@ -47,7 +45,6 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunMuzzle;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunRail;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunRearSight;
-	// Front sight post on the barrel tip.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> GunSight;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) EALHero HeroId = EALHero::Wraith;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) EALTeam TeamId = EALTeam::Ally;
@@ -55,12 +52,14 @@ public:
 	UPROPERTY(Replicated) bool bOnDropship = false;
 	UPROPERTY(Replicated) bool bSkydiving = false;
 	UPROPERTY(EditAnywhere) int32 SquadId = 0;
+	float LastDamagedTime = -100.f;
+	float LastHitConfirmTime = -100.f;
+	UPROPERTY(EditAnywhere, Category="Combat") float RespawnDelay = 2.f;
+	void HandleDeath();
+	void Respawn();
 	void AttachToDropship(AActor* Ship);
 	void DeployFromDropship();
 
-	// Rest pose of GunRoot relative to FPCamera. X must stay > ~20 so the receiver's rear face never crosses the
-	// 10cm near clip, even at full recoil kick-back (KickBackCm). Negative yaw angles the barrel in toward the
-	// crosshair; the slight downward pitch drops the muzzle below it and shows more of the gun's top face.
 	UPROPERTY(EditAnywhere, Category="Viewmodel") FVector GunRestLocation = FVector(33.f, 17.f, -13.f);
 	UPROPERTY(EditAnywhere, Category="Viewmodel") FRotator GunRestRotation = FRotator(-2.f, -6.f, 0.f);
 	UPROPERTY(EditAnywhere, Category="Viewmodel") float BobAmplitude = 1.1f;
@@ -68,16 +67,37 @@ public:
 	UPROPERTY(EditAnywhere, Category="Viewmodel") float SwayScale = 0.012f;
 	UPROPERTY(EditAnywhere, Category="Viewmodel") float SwayMaxDeg = 4.f;
 	UPROPERTY(EditAnywhere, Category="Viewmodel") float SwaySpeed = 9.f;
-	UPROPERTY(EditAnywhere, Category="Viewmodel") float KickBackCm = 5.f;
-	UPROPERTY(EditAnywhere, Category="Viewmodel") float KickPitchDeg = 5.f;
-	UPROPERTY(EditAnywhere, Category="Viewmodel") float KickRecoverSpeed = 14.f;
+	UPROPERTY(EditAnywhere, Category="Viewmodel") float KickBackCm = 6.f;
+	UPROPERTY(EditAnywhere, Category="Viewmodel") float KickPitchDeg = 7.f;
+	UPROPERTY(EditAnywhere, Category="Viewmodel") float KickFrequencyHz = 4.5f;
+	UPROPERTY(EditAnywhere, Category="Viewmodel") float KickDampingRatio = 0.55f;
+	UPROPERTY(EditAnywhere, Category="Viewmodel") float KickSideFraction = 0.1f;
 	UPROPERTY(EditAnywhere, Category="Viewmodel") float LandDipCm = 6.f;
-	UPROPERTY(EditAnywhere, Category="Viewmodel") float ViewKickScale = 0.005f;
 
-	// Crouch is a blend, not a snap: capsule half-height, FP eye height and walk speed all interpolate between the
-	// Standing* / Crouched* values over CrouchDownTime / StandUpTime. Standing up is gated on a capsule overlap test
-	// so the player is never grown into a ceiling or crate gap; while blocked they stay crouched and stand as soon
-	// as the space is clear.
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilPitchLightDeg = 0.4f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilPitchHeavyDeg = 1.3f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilPitchNoise = 0.2f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilYawNoiseDeg = 0.3f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilClimbMaxDeg = 3.f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilClimbSoftStart = 0.45f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilSnapSpeed = 40.f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilRecoverDelay = 0.12f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilRecoverSpeed = 9.f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilRecoverMinDegPerSec = 8.f;
+
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistStrengthPad = 1.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistStrengthMnK = 0.25f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistConeDeg = 8.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistFullRangeCm = 1800.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistMaxRangeCm = 4500.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistPullPerSec = 5.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistMaxPullDegPerSec = 45.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistBodyDeadFraction = 0.6f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistTrackStrength = 0.6f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistFrictionPad = 0.35f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistFrictionMnK = 0.f;
+	UPROPERTY(EditAnywhere, Category="AimAssist") float AssistIdleScale = 0.25f;
+
 	UPROPERTY(EditAnywhere, Category="Crouch") float StandingHalfHeight = 88.f;
 	UPROPERTY(EditAnywhere, Category="Crouch") float CrouchedHalfHeight = 52.f;
 	UPROPERTY(EditAnywhere, Category="Crouch") float StandingEyeZ = 64.f;
@@ -85,7 +105,6 @@ public:
 	UPROPERTY(EditAnywhere, Category="Crouch") float CrouchDownTime = 0.22f;
 	UPROPERTY(EditAnywhere, Category="Crouch") float StandUpTime = 0.26f;
 	UPROPERTY(EditAnywhere, Category="Crouch") float CrouchSpeedScale = 0.47f;
-	// "CrouchHold" action (gamepad B by default): true = crouch only while held, false = toggle like mouse + keyboard.
 	UPROPERTY(EditAnywhere, Category="Crouch") bool bGamepadHoldToCrouch = true;
 
 	FVector GetMuzzleLocation() const;
@@ -94,7 +113,6 @@ protected:
 	void OnJump();
 	void OnFire();
 	void OnFireReleased();
-	// "Crouch" action: toggle (mouse + keyboard). "CrouchHold" action: hold or toggle per bGamepadHoldToCrouch.
 	void OnCrouchToggle();
 	void OnCrouchHoldPressed();
 	void OnCrouchHoldReleased();
@@ -102,11 +120,15 @@ protected:
 	void UpdateCrouch(float DeltaSeconds);
 	void SetCrouchProgress(float NewProgress);
 	void ApplyCrouchPose(float Eased);
-	// True when the full standing capsule fits where it would end up. May settle the capsule onto the floor first.
 	bool TryClearStandUpSpace();
+	void AddFireKick(float Heft);
+	void UpdateAimRecoil(float DeltaSeconds);
+	void UpdateAimAssist(float DeltaSeconds);
+	AALHeroCharacter* FindAssistTarget(const FVector& Eye, const FVector& Fwd, FVector& OutAimDir, float& OutEdgeDeg, float& OutBodyDeg, float& OutDist) const;
+	void NoteInputDevice(bool bGamepad);
+	float AssistLookScale() const;
 	void UpdateViewmodel(float DeltaSeconds);
-	// Constructor-only: creates one gun part under GunRoot. Size is in cm (BasicShapes are 100cm).
-	UStaticMeshComponent* MakeGunPart(const TCHAR* Name, UStaticMesh* Mesh, const FVector& Center, const FVector& Size, const FRotator& Rotation);
+	UStaticMeshComponent* MakeGunPart(const TCHAR* Name, UStaticMesh* InMesh, const FVector& Center, const FVector& Size, const FRotator& Rotation);
 	void MoveForward(float V);
 	void MoveRight(float V);
 	void LookYaw(float V);
@@ -119,18 +141,29 @@ protected:
 
 	UPROPERTY(Replicated) float Health = 200.f;
 	UPROPERTY() float MaxHealth = 200.f;
-	// BasicShapeMaterial, found in the constructor; tinted per part in BeginPlay.
 	UPROPERTY() TObjectPtr<UMaterialInterface> GunBaseMaterial;
 	float FireCooldown = 0.f;
 	bool bFireHeld = false;
-	// Requested crouch state (input) vs. blend progress 0 = standing, 1 = crouched. They differ mid-blend and while
-	// standing up is blocked by geometry.
 	bool bWantsCrouch = false;
 	float CrouchProgress = 0.f;
-	// Hero walk speed; MaxWalkSpeed is derived from this and the crouch blend.
 	float StandingSpeed = 600.f;
 	EALTeam VisualTeam = EALTeam::None;
 	float GunKick = 0.f;
+	float GunKickVel = 0.f;
+	float KickSide = 0.f;
+	float RecoilPitchTarget = 0.f;
+	float RecoilYawTarget = 0.f;
+	float RecoilPitchApplied = 0.f;
+	float RecoilYawApplied = 0.f;
+	float RecoilPitchMark = 0.f;
+	float RecoilYawMark = 0.f;
+	bool bRecoilMarkValid = false;
+	float LastShotTime = -100.f;
+	TWeakObjectPtr<AALHeroCharacter> AssistTarget;
+	FVector AssistPrevCenterDir = FVector::ZeroVector;
+	float AssistWeight = 0.f;
+	float LookInputThisFrame = 0.f;
+	bool bUsingGamepad = false;
 	float GunLandDip = 0.f;
 	float BobTime = 0.f;
 	float BobBlend = 0.f;
@@ -140,4 +173,5 @@ protected:
 	float GamepadLookYawRate = 120.f;
 	float GamepadLookPitchRate = 80.f;
 	float StickDeadZone = 0.24f;
+	float RespawnTimer = -1.f;
 };
