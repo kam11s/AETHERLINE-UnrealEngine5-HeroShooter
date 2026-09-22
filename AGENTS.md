@@ -34,8 +34,10 @@ Allowed PublicDependencyModuleNames only:
 - `ALGameState.h` must stay in the module. HUD includes it.
 
 ## Files you must not delete
+- `Source/Aetherline/ALArenaBuilder.h` + `.cpp`  **(wiped locally once — restore from main, do not empty BeginPlay)**
 - `Source/Aetherline/ALTypes.h`
 - `Source/Aetherline/ALGameState.h` + `.cpp`
+- `Source/Aetherline/ALGameMode.h` + `.cpp`  (must keep `SpawnArenaIfMissing`)
 - `Source/Aetherline/ALLoadGate.h` + `.cpp`
 - `Source/Aetherline.Target.cs`
 - `Source/AetherlineEditor.Target.cs`
@@ -50,10 +52,11 @@ Allowed PublicDependencyModuleNames only:
 3. After source edits the owner rebuilds by opening `Aetherline.uproject` (Yes).
 4. If compile fails, the useful line is `OtherCompilationError` / `fatal error` / `Error:` on an `AL*.h` file — not `aqProf.dll` / `VtuneApi.dll`.
 5. Never tell the owner to enable GAS or Enhanced Input to "fix" a compile.
+6. Never delete `ALArenaBuilder`. Improve `BeginPlay` / `Box` / `Lights`. Do not replace it with an empty actor.
 
 ## Look lock
 - Teal + amber industrial greybox. Do not restyle to a different art direction.
-- Arena is spawned at Play by `AALArenaBuilder`. Do not require the owner to place actors.
+- Arena is spawned at Play by `AALArenaBuilder` via `AALGameMode::SpawnArenaIfMissing`. Do not require the owner to place actors.
 - Concept shots are the target look; this repo is the playable C++ game. Improve `ALArenaBuilder` and lighting. Do not start a second project.
 
 ## Repo hygiene
