@@ -1,7 +1,7 @@
 What GitHub/code gives you (no extra dragging):
 - First-person pawn + camera
-- Gun mesh on the camera (Play to see it)
-- Teal tracers when you shoot
+- FP gun on the camera: teal barrel, amber sight, bob / look sway / recoil kick (Play to see it)
+- Hold LMB or right trigger to auto-fire; teal tracers leave the muzzle
 - HUD: RAVELIN, health, ult, score
 - Teal/amber yard + bots on Play
 - Keyboard + gamepad
